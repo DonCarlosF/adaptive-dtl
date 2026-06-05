@@ -140,7 +140,7 @@ src/
 - **VR/AR plugin support.** Extend the domain interface so a Meta-Quest-rendered "walk to the corner store and buy a quarter's worth of milk" scenario can plug into the same engine. Floreo has shown what immersive functional skill instruction can look like in this population; this would be a complementary classroom tool.
 - **Switch input.** The response method is already a profile field; the rollout routes it to real switch event handling.
 - **AAC core-board overlay.** For students whose primary expressive system is symbol-based, surface a core board alongside the choice array.
-- **IEP progress export.** One-click PDF / CSV of last quarter's accuracy and adaptation events, formatted for an IEP progress report row.
+- **IEP progress export.** One-click CSV of last quarter's accuracy and adaptation events ships today (Export CSV on the student page); a formatted PDF variant is still planned.
 - **District pilot.** Real classroom deployment in a single Mod SDC classroom for one quarter, with paraprofessional training and weekly data reviews.
 
 ---

@@ -7,7 +7,12 @@ import {
   StudentProfile,
 } from "@/engine/types";
 import { sessionRepo } from "@/db/sessionRepo";
-import { Sparkles, ChevronRight, Eye, Play } from "lucide-react";
+import {
+  buildProgressCsv,
+  downloadCsv,
+  progressCsvFilename,
+} from "@/lib/csvExport";
+import { Sparkles, ChevronRight, Eye, Play, Download } from "lucide-react";
 
 // Lazy chunks: Recharts (~210KB raw) and the SessionReplay modal both
 // load only when their UI is reached. See BUNDLE.md.
@@ -76,7 +81,21 @@ export function StudentDetail({ student, onStartSession }: Props) {
       </div>
 
       <div>
-        <h3 className="text-lg font-semibold text-ink mb-2">Recent sessions</h3>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-lg font-semibold text-ink">Recent sessions</h3>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={sessions.length === 0}
+            title="Download last quarter's accuracy and adaptation events as CSV"
+            onClick={() => {
+              const csv = buildProgressCsv(student, sessions);
+              downloadCsv(progressCsvFilename(student), csv);
+            }}
+          >
+            <Download size={14} /> Export CSV
+          </Button>
+        </div>
         <ul className="divide-y divide-line bg-white border border-line rounded-tile">
           {sessions.slice(0, 12).map((s) => (
             <li key={s.id} className="px-4 py-3 flex flex-wrap items-center gap-3">
