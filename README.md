@@ -52,8 +52,8 @@ Opens on `http://localhost:5173/` with the three seed students and several weeks
 
 ## What the app does
 
-- **Teacher Dashboard.** Add students, set their reading level and goals and response method, see trend lines per goal area, scrub through past sessions in the replay view.
-- **Student Session.** Fullscreen, locked to a 3-second hold-to-exit. Audio prompt, 2–4 large choice tiles, soft chime + thumbs-up on correct, errorless re-prompt on wrong, breathing-dot break when the adaptive engine suggests one, calm completion screen at the end.
+- **Teacher Dashboard.** Add students, set their reading level and goals and response method, see trend lines per goal area, scrub through past sessions in the replay view, and export a quarter's progress as CSV or printable PDF.
+- **Student Session.** Fullscreen, locked to a 3-second hold-to-exit. Audio prompt, 2–4 large choice tiles, soft chime + thumbs-up on correct, errorless re-prompt on wrong, breathing-dot break when the adaptive engine suggests one, calm completion screen at the end. Touch or single-switch scanning input.
 - **Three skill domains.** Sight Words (Dolch list, leveled PreK–2nd, with optional AI-introduced words rendered through the same tile component). Money ID (penny → $5 bill, labeled inline SVGs). Community Signs (stop, exit, restroom, walk / don't walk, danger).
 - **Adaptive engine.** Four response-based rules and three gaze-based rules that compose: choice count goes up after 3-in-a-row correct, drops to 2 with errorless on after 2-in-a-row wrong, suggests a break when response time spikes, ends the session early below 50% at trial 8. Gaze rules add an off-screen-for-5-seconds break trigger, a look-before-answer score, and an attention-pacing flag.
 - **AI activity generation.** A bring-your-own-key flow that asks Claude Sonnet for trial sets tailored to a student's reading level, profile note, and recent per-item performance. Responses are validated with Zod before any caching or session use; cached by `(student, domain, contentHash)`; falls back to hand-authored content on any error with a clear toast.
@@ -138,9 +138,9 @@ src/
 
 - **Eye-tracking accuracy tuning** for hard conditions (low light, glasses, off-axis heads) and a teacher-facing camera-positioning aid. Real WebGazer tracking ships today with automatic fallback to the simulated stream — see `EYE_TRACKING.md`.
 - **VR/AR plugin support.** Extend the domain interface so a Meta-Quest-rendered "walk to the corner store and buy a quarter's worth of milk" scenario can plug into the same engine. Floreo has shown what immersive functional skill instruction can look like in this population; this would be a complementary classroom tool.
-- **Switch input.** The response method is already a profile field; the rollout routes it to real switch event handling.
+- **Switch input.** Single-switch scanning ships today — choices are scanned on a configurable dwell and selected with Space/Enter, a mapped switch, or an on-screen Select button. Enabled automatically for "eye gaze" profiles or via Settings → Input & access. Next: multi-switch and step-scanning modes.
 - **AAC core-board overlay.** For students whose primary expressive system is symbol-based, surface a core board alongside the choice array.
-- **IEP progress export.** One-click CSV of last quarter's accuracy and adaptation events ships today (Export CSV on the student page); a formatted PDF variant is still planned.
+- **IEP progress export.** One-click CSV and printable PDF of last quarter's accuracy and adaptation events both ship today (Export CSV / Export PDF on the student page).
 - **District pilot.** Real classroom deployment in a single Mod SDC classroom for one quarter, with paraprofessional training and weekly data reviews.
 
 ---

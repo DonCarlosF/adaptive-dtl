@@ -36,6 +36,7 @@ import { ProgressRing } from "@/components/ProgressRing";
 import { GazeIndicator } from "@/components/GazeIndicator";
 import { useSpeak } from "@/hooks/useSpeak";
 import { useChime } from "@/hooks/useChime";
+import { useSwitchScanning } from "@/hooks/useSwitchScanning";
 import { loadTrialsForSession } from "@/ai/activityGenerator";
 import { getDomain } from "@/domains/registry";
 import {
@@ -71,6 +72,8 @@ export function StudentSession({ student, domain, onExit }: Props) {
   const [highContrast, setHighContrast] = useState(false);
   const [eyeTrackingOn, setEyeTrackingOn] = useState(false);
   const [showGazeIndicator, setShowGazeIndicator] = useState(false);
+  const [switchScanning, setSwitchScanning] = useState(false);
+  const [switchScanIntervalMs, setSwitchScanIntervalMs] = useState(1500);
 
   const startedAtRef = useRef<number>(Date.now());
   const sessionPersistedRef = useRef(false);
@@ -103,6 +106,12 @@ export function StudentSession({ student, domain, onExit }: Props) {
       setHighContrast(settings.highContrast);
       setEyeTrackingOn(settings.eyeTrackingEnabled);
       setShowGazeIndicator(settings.gazeIndicatorEnabled);
+      // Switch scanning is the natural input for "eye gaze" / "both" profiles
+      // and anyone the teacher has turned it on for.
+      setSwitchScanning(
+        settings.switchScanning || student.responseMethod === "eye gaze",
+      );
+      setSwitchScanIntervalMs(settings.switchScanIntervalMs);
       if (settings.eyeTrackingEnabled) {
         // Start gaze tracking for this session — real camera when opted in,
         // simulated otherwise (with automatic fallback).
@@ -348,6 +357,23 @@ export function StudentSession({ student, domain, onExit }: Props) {
     ],
   );
 
+  // Single-switch scanning input. Active only during an unlocked trial;
+  // a switch activation (Space/Enter or the on-screen Select button)
+  // chooses whichever tile is currently highlighted.
+  const scanActive = phase.kind === "trial" && phase.startedAt !== 0;
+  const scanCount = phase.kind === "trial" ? phase.trial.choiceIds.length : 0;
+  const { index: scanIndex, select: scanSelect } = useSwitchScanning({
+    enabled: switchScanning,
+    count: scanCount,
+    intervalMs: switchScanIntervalMs,
+    active: scanActive,
+    onSelect: (i) => {
+      if (phase.kind !== "trial") return;
+      const id = phase.trial.choiceIds[i];
+      if (id) handleChoose(id);
+    },
+  });
+
   // Persist session when we hit "done".
   useEffect(() => {
     if (phase.kind !== "done") return;
@@ -388,6 +414,7 @@ export function StudentSession({ student, domain, onExit }: Props) {
             ariaLabel={dom.ariaLabel}
             promptRef={promptElRef}
             choiceContainerRef={choiceContainerElRef}
+            scanIndex={switchScanning ? scanIndex : -1}
           />
         )}
 
@@ -409,6 +436,16 @@ export function StudentSession({ student, domain, onExit }: Props) {
       </div>
 
       {eyeTrackingOn && <GazeIndicator enabled={showGazeIndicator} />}
+
+      {switchScanning && scanActive && (
+        <button
+          onClick={scanSelect}
+          aria-label="Select the highlighted choice"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 h-20 px-12 rounded-tile bg-sky-500 text-white text-xl font-semibold shadow-card hover:bg-sky-600 active:bg-sky-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-sky-200 select-none"
+        >
+          Select
+        </button>
+      )}
     </div>
   );
 }
@@ -440,6 +477,7 @@ function TrialView({
   ariaLabel,
   promptRef,
   choiceContainerRef,
+  scanIndex,
 }: {
   trial: PresentedTrial;
   onChoose: (id: string) => void;
@@ -448,6 +486,7 @@ function TrialView({
   ariaLabel: (id: string) => string;
   promptRef: React.MutableRefObject<HTMLParagraphElement | null>;
   choiceContainerRef: React.MutableRefObject<HTMLDivElement | null>;
+  scanIndex: number;
 }) {
   const items: ChoiceItem[] = trial.choiceIds.map((id) => ({
     id,
@@ -470,6 +509,7 @@ function TrialView({
           errorlessHighlight={trial.errorlessHighlight}
           locked={locked}
           onChoose={onChoose}
+          scanIndex={scanIndex}
         />
       </div>
     </div>

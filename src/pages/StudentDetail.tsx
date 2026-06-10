@@ -12,7 +12,15 @@ import {
   downloadCsv,
   progressCsvFilename,
 } from "@/lib/csvExport";
-import { Sparkles, ChevronRight, Eye, Play, Download } from "lucide-react";
+import { printProgressReport } from "@/lib/pdfExport";
+import {
+  Sparkles,
+  ChevronRight,
+  Eye,
+  Play,
+  Download,
+  FileText,
+} from "lucide-react";
 
 // Lazy chunks: Recharts (~210KB raw) and the SessionReplay modal both
 // load only when their UI is reached. See BUNDLE.md.
@@ -83,18 +91,29 @@ export function StudentDetail({ student, onStartSession }: Props) {
       <div>
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-lg font-semibold text-ink">Recent sessions</h3>
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={sessions.length === 0}
-            title="Download last quarter's accuracy and adaptation events as CSV"
-            onClick={() => {
-              const csv = buildProgressCsv(student, sessions);
-              downloadCsv(progressCsvFilename(student), csv);
-            }}
-          >
-            <Download size={14} /> Export CSV
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={sessions.length === 0}
+              title="Open a printable progress report to save as PDF"
+              onClick={() => printProgressReport(student, sessions)}
+            >
+              <FileText size={14} /> Export PDF
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={sessions.length === 0}
+              title="Download last quarter's accuracy and adaptation events as CSV"
+              onClick={() => {
+                const csv = buildProgressCsv(student, sessions);
+                downloadCsv(progressCsvFilename(student), csv);
+              }}
+            >
+              <Download size={14} /> Export CSV
+            </Button>
+          </div>
         </div>
         <ul className="divide-y divide-line bg-white border border-line rounded-tile">
           {sessions.slice(0, 12).map((s) => (

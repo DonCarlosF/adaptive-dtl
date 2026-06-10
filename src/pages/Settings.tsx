@@ -6,6 +6,7 @@ import {
   Sparkles,
   Loader2,
   Check,
+  Accessibility,
 } from "lucide-react";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
@@ -217,6 +218,41 @@ export function Settings({ onBack }: Props) {
             session list and attached to the next session you start with that
             student in the corresponding domain.
           </p>
+        </Card>
+
+        <Card className="p-6">
+          <SectionHeader
+            icon={<Accessibility size={18} />}
+            title="Input & access"
+            subtitle="Alternative input for students who can't reliably touch a target. Profiles set to 'eye gaze' use scanning automatically."
+          />
+          <Row
+            label="Single-switch scanning"
+            help="Highlights choices one at a time. Press Space/Enter, a mapped switch, or the on-screen Select button to choose the highlighted tile."
+            control={
+              <Toggle
+                checked={s.switchScanning}
+                onChange={(v) => update({ switchScanning: v })}
+              />
+            }
+          />
+          <Row
+            label={`Scan dwell: ${(s.switchScanIntervalMs / 1000).toFixed(1)}s per item`}
+            help="How long each choice stays highlighted before the scan advances."
+            control={
+              <input
+                type="range"
+                min={500}
+                max={4000}
+                step={250}
+                value={s.switchScanIntervalMs}
+                onChange={(e) =>
+                  update({ switchScanIntervalMs: Number(e.target.value) })
+                }
+                className="w-48 accent-sage-500"
+              />
+            }
+          />
         </Card>
 
         <Card className="p-6">
