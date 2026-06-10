@@ -19,9 +19,13 @@ import { DomainId, DOMAIN_LABELS, StudentProfile } from "@/engine/types";
 import { requestAIGeneration } from "@/ai/activityGenerator";
 import { describeError } from "@/ai/anthropicErrors";
 import { EyeTrackingArchitecturePanel } from "./EyeTrackingArchitecture";
+import { isCloudEnabled } from "@/api/client";
+import { logout } from "@/api/auth";
+import { LogOut } from "lucide-react";
 
 interface Props {
   onBack: () => void;
+  onLogout?: () => void;
 }
 
 const DOMAINS: DomainId[] = ["sightWords", "moneyId", "communitySigns"];
@@ -32,7 +36,7 @@ type GenStatus =
   | { kind: "ok"; cached: boolean; count: number; at: number }
   | { kind: "error"; message: string };
 
-export function Settings({ onBack }: Props) {
+export function Settings({ onBack, onLogout }: Props) {
   const [s, setS] = useState<AppSettings | null>(null);
   const [students, setStudents] = useState<StudentProfile[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState<string>("");
@@ -64,7 +68,7 @@ export function Settings({ onBack }: Props) {
       setToast("Add or select a student first.");
       return;
     }
-    if (!s.apiKey.trim()) {
+    if (!isCloudEnabled() && !s.apiKey.trim()) {
       setToast("Add an Anthropic API key in this panel first.");
       return;
     }
@@ -112,6 +116,31 @@ export function Settings({ onBack }: Props) {
       </header>
 
       <main className="max-w-3xl mx-auto px-6 py-8 space-y-6">
+        {isCloudEnabled() && onLogout && (
+          <Card className="p-6">
+            <SectionHeader
+              icon={<LogOut size={18} />}
+              title="Account"
+              subtitle="You're signed in to the cloud backend. Students and sessions sync to your account."
+            />
+            <Row
+              label="Sign out"
+              control={
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    logout();
+                    onLogout();
+                  }}
+                >
+                  Sign out
+                </Button>
+              }
+            />
+          </Card>
+        )}
+
         <Card className="p-6">
           <SectionHeader
             icon={<Eye size={18} />}
@@ -173,19 +202,27 @@ export function Settings({ onBack }: Props) {
             title="AI-generated activities"
             subtitle="Generate fresh trials tailored to a student's reading level and recent performance. Cached locally — identical prompts won't re-fire the API."
           />
-          <Row
-            label="Anthropic API key"
-            control={
-              <input
-                type="password"
-                value={s.apiKey}
-                onChange={(e) => update({ apiKey: e.target.value })}
-                placeholder="sk-ant-..."
-                className="w-72 max-w-full rounded-xl border border-line bg-white px-3 py-2 text-sm focus:outline-none focus:border-sage"
-              />
-            }
-            help="Stored only on this device."
-          />
+          {isCloudEnabled() ? (
+            <Row
+              label="Anthropic API key"
+              control={<span className="text-sm text-muted">Managed by the server</span>}
+              help="In cloud mode the key lives on the backend and never reaches the browser."
+            />
+          ) : (
+            <Row
+              label="Anthropic API key"
+              control={
+                <input
+                  type="password"
+                  value={s.apiKey}
+                  onChange={(e) => update({ apiKey: e.target.value })}
+                  placeholder="sk-ant-..."
+                  className="w-72 max-w-full rounded-xl border border-line bg-white px-3 py-2 text-sm focus:outline-none focus:border-sage"
+                />
+              }
+              help="Stored only on this device."
+            />
+          )}
           <Row
             label="Generate for"
             control={

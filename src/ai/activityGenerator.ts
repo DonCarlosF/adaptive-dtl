@@ -113,7 +113,11 @@ export async function requestAIGeneration(
   apiKey: string,
   trialCount = 8,
 ): Promise<GenerationOutcome> {
-  if (!apiKey) return { ok: false, error: { kind: "no-key" } };
+  // In cloud mode the key lives on the server, so an empty client-side key
+  // is fine; otherwise we need a browser key for the direct call.
+  const { isCloudEnabled, getToken } = await import("@/api/client");
+  const cloud = isCloudEnabled() && getToken() !== null;
+  if (!cloud && !apiKey) return { ok: false, error: { kind: "no-key" } };
 
   const ctx = await buildContext(domain, student, trialCount);
   const userPrompt = buildUserPrompt(ctx);
@@ -130,16 +134,19 @@ export async function requestAIGeneration(
     };
   }
 
-  // Dynamic import: keeps the Anthropic fetch wrapper out of any chunk
-  // that doesn't generate (the student session, the dashboard).
-  const { callAnthropic, DEFAULT_AI_MODEL: DEFAULT_MODEL } = await import(
-    "./anthropicClient"
-  );
-  const call = await callAnthropic({
-    apiKey,
-    systemPrompt: SYSTEM_PROMPT,
-    userPrompt,
-  });
+  // Cloud → backend proxy (key stays server-side). Local → direct
+  // browser call. Both are dynamically imported so neither lands in
+  // chunks that don't generate (the student session, the dashboard).
+  const call = cloud
+    ? await (await import("@/api/aiProxy")).callViaProxy({
+        systemPrompt: SYSTEM_PROMPT,
+        userPrompt,
+      })
+    : await (await import("./anthropicClient")).callAnthropic({
+        apiKey,
+        systemPrompt: SYSTEM_PROMPT,
+        userPrompt,
+      });
   if (!call.ok) return { ok: false, error: call.error };
 
   const parsed = parseResponse(call.result.text);
@@ -174,7 +181,7 @@ export async function requestAIGeneration(
     templates,
     cached: false,
     generatedAt,
-    model: call.result.model ?? DEFAULT_MODEL,
+    model: call.result.model,
   };
 }
 

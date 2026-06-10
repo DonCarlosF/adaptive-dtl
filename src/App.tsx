@@ -1,7 +1,10 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { LoadingScreen } from "@/components/LoadingScreen";
+import { Login } from "@/pages/Login";
 import { seedIfEmpty } from "@/db/seed";
 import { DomainId, StudentProfile } from "@/engine/types";
+import { isCloudEnabled } from "@/api/client";
+import { currentUser, AuthUser } from "@/api/auth";
 
 // Each top-level view is its own lazy chunk. This means a user landing
 // on the dashboard does not download the session page or the settings
@@ -25,15 +28,30 @@ type View =
 
 export default function App() {
   const [ready, setReady] = useState(false);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [view, setView] = useState<View>({ kind: "dashboard" });
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
-    seedIfEmpty().then(() => setReady(true));
+    (async () => {
+      if (isCloudEnabled()) {
+        // Cloud mode: data lives per-account on the server, so don't seed
+        // the local DB. Resolve the logged-in user (if any) first.
+        setUser(await currentUser());
+      } else {
+        await seedIfEmpty();
+      }
+      setReady(true);
+    })();
   }, []);
 
   if (!ready) {
     return <LoadingScreen />;
+  }
+
+  // Cloud mode requires a logged-in teacher before anything else.
+  if (isCloudEnabled() && !user) {
+    return <Login onAuthed={setUser} />;
   }
 
   if (view.kind === "session") {
@@ -54,7 +72,13 @@ export default function App() {
   if (view.kind === "settings") {
     return (
       <Suspense fallback={<LoadingScreen />}>
-        <Settings onBack={() => setView({ kind: "dashboard" })} />
+        <Settings
+          onBack={() => setView({ kind: "dashboard" })}
+          onLogout={() => {
+            setUser(null);
+            setView({ kind: "dashboard" });
+          }}
+        />
       </Suspense>
     );
   }
