@@ -73,6 +73,17 @@ export function buildProgressCsv(
     .sort((a, b) => a.startedAt - b.startedAt);
 
   const lines: string[] = [];
+
+  // Context header — the identifying rows a teacher wants at the top of an
+  // IEP progress report before the per-session data.
+  lines.push(csvRow(["Student", student.name]));
+  lines.push(csvRow(["Grade", student.grade]));
+  lines.push(csvRow(["Reading level", student.readingLevel]));
+  lines.push(
+    csvRow(["Reporting window", `${windowDays} days ending ${isoDate(now)}`]),
+  );
+  lines.push(csvRow([])); // blank separator
+
   lines.push(
     csvRow([
       "Date",
