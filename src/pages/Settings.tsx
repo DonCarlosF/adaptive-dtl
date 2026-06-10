@@ -115,11 +115,11 @@ export function Settings({ onBack }: Props) {
           <SectionHeader
             icon={<Eye size={18} />}
             title="Eye tracking"
-            subtitle="When enabled, the app emits a simulated gaze stream so the gaze rules and overlay run end-to-end. Real camera integration is the next milestone."
+            subtitle="Drive the gaze rules and overlay from real webcam tracking (WebGazer) or a built-in simulated stream. The simulator is the fallback whenever a camera isn't available."
           />
           <Row
             label="Enable eye tracking"
-            help="Starts the simulated gaze stream at ~10Hz."
+            help="Starts a gaze stream at ~10Hz for the session."
             control={
               <Toggle
                 checked={s.eyeTrackingEnabled}
@@ -128,8 +128,18 @@ export function Settings({ onBack }: Props) {
             }
           />
           <Row
+            label="Use camera (real tracking)"
+            help="Uses the webcam via WebGazer. Falls back to the simulated stream if the camera is blocked or unavailable. Calibrate after turning this on."
+            control={
+              <Toggle
+                checked={s.cameraTracking}
+                onChange={(v) => update({ cameraTracking: v })}
+              />
+            }
+          />
+          <Row
             label="Show gaze indicator during sessions"
-            help="Teacher demo only — shows a dot tracking the simulated gaze. Off for student-facing use."
+            help="Teacher demo only — shows a dot tracking the gaze. Off for student-facing use."
             control={
               <Toggle
                 checked={s.gazeIndicatorEnabled}
@@ -261,7 +271,12 @@ export function Settings({ onBack }: Props) {
         </Card>
       </main>
 
-      {showCal && <CalibrationOverlay onClose={() => setShowCal(false)} />}
+      {showCal && (
+        <CalibrationOverlay
+          onClose={() => setShowCal(false)}
+          cameraTracking={s.cameraTracking}
+        />
+      )}
 
       <Toast
         show={toast !== null}

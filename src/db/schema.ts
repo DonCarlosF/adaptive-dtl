@@ -4,12 +4,22 @@ import { AIGeneratedSet, SessionRecord, StudentProfile } from "@/engine/types";
 export interface AppSettings {
   id: "app";
   eyeTrackingEnabled: boolean;
-  /** Show the simulated gaze indicator dot during sessions (teacher demo). */
+  /**
+   * Use the real webcam (WebGazer) for gaze tracking. When false, the app
+   * uses the simulated gaze stream. Falls back to simulated automatically
+   * if the camera or library is unavailable.
+   */
+  cameraTracking: boolean;
+  /** Show the gaze indicator dot during sessions (teacher demo). */
   gazeIndicatorEnabled: boolean;
   highContrast: boolean;
   dyslexicFont: boolean;
   audioVolume: number; // 0..1
   apiKey: string;
+  /** Route student responses through single-switch scanning input. */
+  switchScanning: boolean;
+  /** Dwell time per item (ms) when switch scanning is on. */
+  switchScanIntervalMs: number;
 }
 
 class AdaptiveDB extends Dexie {
@@ -40,9 +50,12 @@ export const db = new AdaptiveDB();
 export const DEFAULT_SETTINGS: AppSettings = {
   id: "app",
   eyeTrackingEnabled: false,
+  cameraTracking: false,
   gazeIndicatorEnabled: true,
   highContrast: false,
   dyslexicFont: false,
   audioVolume: 0.7,
   apiKey: "",
+  switchScanning: false,
+  switchScanIntervalMs: 1500,
 };

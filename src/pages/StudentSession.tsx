@@ -104,14 +104,17 @@ export function StudentSession({ student, domain, onExit }: Props) {
       setEyeTrackingOn(settings.eyeTrackingEnabled);
       setShowGazeIndicator(settings.gazeIndicatorEnabled);
       if (settings.eyeTrackingEnabled) {
-        // Ensure the simulator is running for this session.
-        useGazeStore.getState().setEnabled(true);
+        // Start gaze tracking for this session — real camera when opted in,
+        // simulated otherwise (with automatic fallback).
+        await useGazeStore.getState().enable(settings.cameraTracking);
         useGazeStore.getState().resetBuffer();
       }
     })();
     return () => {
       cancelled = true;
       cancelSpeech();
+      // Release the camera / stop the stream when the session unmounts.
+      useGazeStore.getState().disable();
     };
   }, [domain, student, cancelSpeech]);
 

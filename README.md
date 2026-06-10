@@ -57,7 +57,7 @@ Opens on `http://localhost:5173/` with the three seed students and several weeks
 - **Three skill domains.** Sight Words (Dolch list, leveled PreK–2nd, with optional AI-introduced words rendered through the same tile component). Money ID (penny → $5 bill, labeled inline SVGs). Community Signs (stop, exit, restroom, walk / don't walk, danger).
 - **Adaptive engine.** Four response-based rules and three gaze-based rules that compose: choice count goes up after 3-in-a-row correct, drops to 2 with errorless on after 2-in-a-row wrong, suggests a break when response time spikes, ends the session early below 50% at trial 8. Gaze rules add an off-screen-for-5-seconds break trigger, a look-before-answer score, and an attention-pacing flag.
 - **AI activity generation.** A bring-your-own-key flow that asks Claude Sonnet for trial sets tailored to a student's reading level, profile note, and recent per-item performance. Responses are validated with Zod before any caching or session use; cached by `(student, domain, contentHash)`; falls back to hand-authored content on any error with a clear toast.
-- **Simulated eye tracking.** A 10Hz synthetic gaze stream with realistic drift, saccades, and occasional off-screen excursions. Real downstream rules consume it, the breathing-dot break fires from it, gaze traces are recorded into session records, the indicator overlay shows it on screen during teacher demos.
+- **Eye tracking.** Real webcam tracking via WebGazer.js (opt-in per the camera toggle in Settings), or a 10Hz synthetic gaze stream with realistic drift, saccades, and off-screen excursions. The synthetic stream is also the automatic fallback when a camera is unavailable or denied. Either source feeds the same rules: the breathing-dot break fires from it, gaze traces are recorded into session records, and the indicator overlay can show it during teacher demos (badged "Simulated" when it isn't the camera).
 - **Session replay.** Scrub a completed session, see every trial, every adaptation event, and the recorded gaze trace overlaid per trial.
 - **Settings.** Eye tracking and gaze indicator toggles, 5-point calibration UI (real flow, mock training behind it), per-domain AI generation buttons, the architecture panel with the data-flow diagram, high-contrast mode, OpenDyslexic font for sight words, audio volume.
 - **Privacy.** No backend, no auth, no analytics. The only outbound network call is the AI generation call to Anthropic, and only when you click Generate.
@@ -109,7 +109,7 @@ src/
     gazeRules.ts        gaze-rule implementations (off-screen, look-before, pacing)
     sessionLogger.ts    state → SessionRecord
   eyetracking/
-    webgazerWrapper.ts  stub for real WebGazer integration
+    webgazerWrapper.ts  real WebGazer integration (on-demand, camera fallback)
     syntheticGaze.ts    10Hz simulator (drift / saccade / off-screen)
     gazeStore.ts        zustand store, drives the simulator
     calibration.tsx     5-point UI with demo notice
@@ -136,7 +136,7 @@ src/
 
 ## Roadmap
 
-- **Real webcam eye tracking** via WebGazer.js. The swap is small and labeled — `EYE_TRACKING.md` lists the three files that change.
+- **Eye-tracking accuracy tuning** for hard conditions (low light, glasses, off-axis heads) and a teacher-facing camera-positioning aid. Real WebGazer tracking ships today with automatic fallback to the simulated stream — see `EYE_TRACKING.md`.
 - **VR/AR plugin support.** Extend the domain interface so a Meta-Quest-rendered "walk to the corner store and buy a quarter's worth of milk" scenario can plug into the same engine. Floreo has shown what immersive functional skill instruction can look like in this population; this would be a complementary classroom tool.
 - **Switch input.** The response method is already a profile field; the rollout routes it to real switch event handling.
 - **AAC core-board overlay.** For students whose primary expressive system is symbol-based, surface a core board alongside the choice array.
