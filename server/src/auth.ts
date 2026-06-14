@@ -24,6 +24,22 @@ export function signToken(userId: string, secret: string): string {
   return jwt.sign({ sub: userId }, secret, { expiresIn: TOKEN_TTL });
 }
 
+/**
+ * Verify a JWT and return its payload, or null if invalid/expired. Used by
+ * the WebSocket upgrade handler (which can't use Express middleware).
+ */
+export function verifyToken(
+  token: string,
+  secret: string,
+): { sub: string } | null {
+  try {
+    const payload = jwt.verify(token, secret) as { sub?: string };
+    return payload.sub ? { sub: payload.sub } : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function register(
   store: Store,
   secret: string,

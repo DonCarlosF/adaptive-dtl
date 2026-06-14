@@ -20,11 +20,17 @@ const StudentSession = lazy(() =>
 const Settings = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.Settings })),
 );
+// realtime co-presence: teacher live-monitor view (lazy chunk).
+const TeacherMonitor = lazy(() =>
+  import("@/pages/TeacherMonitor").then((m) => ({ default: m.TeacherMonitor })),
+);
 
 type View =
   | { kind: "dashboard" }
   | { kind: "session"; student: StudentProfile; domain: DomainId }
-  | { kind: "settings" };
+  | { kind: "settings" }
+  // realtime co-presence: teacher watches a live session by join code.
+  | { kind: "monitor" };
 
 export default function App() {
   const [ready, setReady] = useState(false);
@@ -83,11 +89,21 @@ export default function App() {
     );
   }
 
+  // realtime co-presence: live teacher monitor route.
+  if (view.kind === "monitor") {
+    return (
+      <Suspense fallback={<LoadingScreen />}>
+        <TeacherMonitor onBack={() => setView({ kind: "dashboard" })} />
+      </Suspense>
+    );
+  }
+
   return (
     <Suspense fallback={<LoadingScreen />}>
       <TeacherDashboard
         refreshKey={refreshKey}
         onOpenSettings={() => setView({ kind: "settings" })}
+        onOpenMonitor={() => setView({ kind: "monitor" })}
         onStartSession={(student, domain) =>
           setView({ kind: "session", student, domain })
         }

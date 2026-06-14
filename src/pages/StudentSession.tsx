@@ -55,6 +55,10 @@ import {
   useGazeStore,
 } from "@/eyetracking/gazeStore";
 import { Sparkles } from "lucide-react";
+// --- realtime co-presence: imports ---
+import { useSessionBroadcast } from "@/realtime/useSessionBroadcast";
+import type { Snapshot } from "@/realtime/protocol";
+// --- end realtime co-presence ---
 
 interface Props {
   student: StudentProfile;
@@ -458,6 +462,71 @@ export function StudentSession({ student, domain, onExit }: Props) {
     },
   });
 
+  // --- realtime co-presence: broadcast + remote control (additive) ---
+  // The teacher's live monitor mirrors this session and can steer it. All of
+  // the co-presence wiring funnels through the single hook below; it no-ops
+  // entirely when the cloud backend isn't configured.
+  const latestGaze = useGazeStore((s) => s.latest);
+
+  const broadcastSnapshot = useMemo<Snapshot | null>(() => {
+    const correct = state.trials.filter((t) => t.correct).length;
+    return {
+      phase: phase.kind,
+      domain,
+      trialIndex: state.trials.length,
+      plannedTrials: PLANNED_TRIALS_PER_SESSION,
+      correct,
+      numChoices: state.numChoices,
+      errorlessHighlight: state.errorlessHighlight,
+      gaze:
+        eyeTrackingOn && latestGaze
+          ? {
+              x: latestGaze.x,
+              y: latestGaze.y,
+              confidence: latestGaze.confidence,
+              vw: window.innerWidth,
+              vh: window.innerHeight,
+            }
+          : null,
+      lastAdaptation: state.adaptations.at(-1)
+        ? {
+            kind: state.adaptations.at(-1)!.kind,
+            reason: state.adaptations.at(-1)!.reason,
+            timestamp: state.adaptations.at(-1)!.timestamp,
+          }
+        : null,
+    };
+  }, [phase.kind, state, domain, eyeTrackingOn, latestGaze]);
+
+  const handleRemoteControl = useCallback(
+    (control: { control: string; numChoices?: 2 | 3 | 4 }) => {
+      if (control.control === "force-break") {
+        if (phase.kind === "done") return;
+        lastBreakAtRef.current = Date.now();
+        cancelSpeech();
+        setPhase({ kind: "break" });
+        speak("Take a moment. We can keep going when you're ready.", {
+          volume: audioVolume,
+        });
+      } else if (
+        control.control === "set-num-choices" &&
+        control.numChoices != null
+      ) {
+        setState((s) => ({ ...s, numChoices: control.numChoices! }));
+      } else if (control.control === "end-session") {
+        cancelSpeech();
+        setPhase({ kind: "done", endedEarly: true });
+      }
+    },
+    [phase.kind, audioVolume, speak, cancelSpeech],
+  );
+
+  const { joinCode, teacherWatching } = useSessionBroadcast(
+    { enabled: phase.kind !== "done", snapshot: broadcastSnapshot },
+    handleRemoteControl,
+  );
+  // --- end realtime co-presence ---
+
   // Persist session when we hit "done".
   useEffect(() => {
     if (phase.kind !== "done") return;
@@ -533,6 +602,26 @@ export function StudentSession({ student, domain, onExit }: Props) {
           Select
         </button>
       )}
+
+      {/* realtime co-presence: small join-code chip for the teacher's monitor. */}
+      {joinCode && <JoinCodeChip code={joinCode} watching={teacherWatching} />}
+    </div>
+  );
+}
+
+// realtime co-presence: unobtrusive code shown when a room is live.
+function JoinCodeChip({ code, watching }: { code: string; watching: boolean }) {
+  return (
+    <div className="absolute top-4 right-4 select-none flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/90 border border-line text-xs text-muted">
+      <span
+        className={
+          "inline-block w-1.5 h-1.5 rounded-full " +
+          (watching ? "bg-sage" : "bg-line")
+        }
+        aria-hidden
+      />
+      <span>{watching ? "Teacher watching" : "Monitor code"}</span>
+      <span className="font-mono tracking-widest text-ink">{code}</span>
     </div>
   );
 }
