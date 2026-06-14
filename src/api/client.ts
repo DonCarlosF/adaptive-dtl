@@ -17,6 +17,23 @@ export function isCloudEnabled(): boolean {
   return Boolean(API_URL);
 }
 
+/** Base URL of the cloud backend, or null in local mode. */
+export function apiBaseUrl(): string | null {
+  return API_URL ?? null;
+}
+
+/** WebSocket base URL derived from the API URL (http→ws, https→wss). */
+export function wsBaseUrl(): string | null {
+  if (!API_URL) return null;
+  return API_URL.replace(/^http/, "ws");
+}
+
+/** Authorization header for raw fetches that bypass apiFetch (e.g. streaming). */
+export function authHeader(): Record<string, string> {
+  const token = getToken();
+  return token ? { authorization: `Bearer ${token}` } : {};
+}
+
 export function getToken(): string | null {
   try {
     return localStorage.getItem(TOKEN_KEY);

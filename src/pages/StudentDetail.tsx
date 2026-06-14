@@ -20,13 +20,19 @@ import {
   Play,
   Download,
   FileText,
+  MessageSquare,
 } from "lucide-react";
 
-// Lazy chunks: Recharts (~210KB raw) and the SessionReplay modal both
-// load only when their UI is reached. See BUNDLE.md.
+// Lazy chunks: Recharts (~210KB raw), the SessionReplay modal, and the
+// Co-pilot drawer all load only when their UI is reached. Keeping the
+// co-pilot lazy keeps the streaming/prompt/zod code out of this view's
+// initial chunk. See BUNDLE.md.
 const DomainTrendChart = lazy(() => import("./DomainTrendChart"));
 const SessionReplay = lazy(() =>
   import("./SessionReplay").then((m) => ({ default: m.SessionReplay })),
+);
+const Copilot = lazy(() =>
+  import("./Copilot").then((m) => ({ default: m.Copilot })),
 );
 
 interface Props {
@@ -37,6 +43,8 @@ interface Props {
 export function StudentDetail({ student, onStartSession }: Props) {
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [replaying, setReplaying] = useState<SessionRecord | null>(null);
+  // Co-pilot entry point: opens the streaming Q&A / IEP-draft drawer.
+  const [copilotOpen, setCopilotOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,6 +83,15 @@ export function StudentDetail({ student, onStartSession }: Props) {
             <div className="mt-2 text-sm text-ink/80 italic">{student.note}</div>
           )}
         </div>
+        {/* Co-pilot entry point — opens the lazy-loaded streaming drawer. */}
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => setCopilotOpen(true)}
+          title="Ask the AI co-pilot about this student"
+        >
+          <MessageSquare size={16} /> Co-pilot
+        </Button>
       </div>
 
       <div className="grid lg:grid-cols-2 gap-6">
@@ -169,6 +186,12 @@ export function StudentDetail({ student, onStartSession }: Props) {
       {replaying && (
         <Suspense fallback={null}>
           <SessionReplay session={replaying} onClose={() => setReplaying(null)} />
+        </Suspense>
+      )}
+
+      {copilotOpen && (
+        <Suspense fallback={null}>
+          <Copilot student={student} onClose={() => setCopilotOpen(false)} />
         </Suspense>
       )}
     </div>

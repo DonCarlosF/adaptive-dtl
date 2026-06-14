@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.js";
 import { Store } from "../src/store.js";
-import type { ProxyParams, ProxyResult } from "../src/anthropic.js";
+import type { ProxyParams, ProxyResult, StreamResult } from "../src/anthropic.js";
 
 const JWT_SECRET = "test-secret-please-rotate";
 
@@ -13,6 +13,25 @@ function makeApp(proxy?: (k: string, p: ProxyParams) => Promise<ProxyResult>) {
     anthropicApiKey: "sk-test",
     proxy,
   });
+}
+
+function makeStreamApp(streamer: (k: string, p: ProxyParams) => Promise<StreamResult>) {
+  return createApp({
+    store: new Store(),
+    jwtSecret: JWT_SECRET,
+    anthropicApiKey: "sk-test",
+    streamer,
+  });
+}
+
+/** A fake stream that yields two SSE frames like the real Anthropic stream. */
+function fakeStream(): AsyncIterable<string> {
+  return {
+    async *[Symbol.asyncIterator]() {
+      yield 'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello "}}\n\n';
+      yield 'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"there"}}\n\n';
+    },
+  };
 }
 
 async function registerUser(app: ReturnType<typeof makeApp>, email: string) {
@@ -181,5 +200,54 @@ describe("AI proxy", () => {
       .set("Authorization", `Bearer ${token}`)
       .send({ systemPrompt: "s", userPrompt: "u" });
     expect(res.status).toBe(429);
+  });
+});
+
+describe("AI stream proxy", () => {
+  it("relays SSE frames as text/event-stream, key stays server-side", async () => {
+    let seenKey = "";
+    const app = makeStreamApp(async (key) => {
+      seenKey = key;
+      return { ok: true, stream: fakeStream() };
+    });
+    const token = await registerUser(app, "stream@example.com");
+    const res = await request(app)
+      .post("/api/ai/stream")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ systemPrompt: "sys", userPrompt: "hi" });
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/event-stream");
+    expect(res.text).toContain("Hello ");
+    expect(res.text).toContain("there");
+    expect(seenKey).toBe("sk-test");
+    expect(res.text).not.toContain("sk-test");
+  });
+
+  it("requires auth", async () => {
+    const app = makeStreamApp(async () => ({ ok: true, stream: fakeStream() }));
+    const res = await request(app)
+      .post("/api/ai/stream")
+      .send({ systemPrompt: "s", userPrompt: "u" });
+    expect(res.status).toBe(401);
+  });
+
+  it("returns the upstream status when the stream can't open", async () => {
+    const app = makeStreamApp(async () => ({ ok: false, status: 503, error: "no key" }));
+    const token = await registerUser(app, "nostream@example.com");
+    const res = await request(app)
+      .post("/api/ai/stream")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ systemPrompt: "s", userPrompt: "u" });
+    expect(res.status).toBe(503);
+  });
+
+  it("validates the request body", async () => {
+    const app = makeStreamApp(async () => ({ ok: true, stream: fakeStream() }));
+    const token = await registerUser(app, "badbody@example.com");
+    const res = await request(app)
+      .post("/api/ai/stream")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ systemPrompt: "" });
+    expect(res.status).toBe(400);
   });
 });

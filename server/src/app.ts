@@ -9,7 +9,13 @@ import {
   register,
   requireAuth,
 } from "./auth.js";
-import { ProxyParams, ProxyResult, proxyAnthropic } from "./anthropic.js";
+import {
+  ProxyParams,
+  ProxyResult,
+  proxyAnthropic,
+  StreamResult,
+  streamAnthropic,
+} from "./anthropic.js";
 
 export interface AppOptions {
   store: Store;
@@ -17,6 +23,8 @@ export interface AppOptions {
   anthropicApiKey: string;
   /** Injectable for tests so the AI route never hits the network. */
   proxy?: (apiKey: string, params: ProxyParams) => Promise<ProxyResult>;
+  /** Injectable streaming proxy for tests. */
+  streamer?: (apiKey: string, params: ProxyParams) => Promise<StreamResult>;
 }
 
 const recordSchema = z.object({ id: z.string().min(1).max(200) }).passthrough();
@@ -31,6 +39,7 @@ const aiMessageSchema = z.object({
 export function createApp(opts: AppOptions) {
   const { store, jwtSecret, anthropicApiKey } = opts;
   const proxy = opts.proxy ?? proxyAnthropic;
+  const streamer = opts.streamer ?? streamAnthropic;
   const auth = requireAuth(jwtSecret);
 
   const app = express();
@@ -135,6 +144,37 @@ export function createApp(opts: AppOptions) {
     const out = await proxy(anthropicApiKey, parsed.data);
     if (!out.ok) return res.status(out.status).json({ error: out.error });
     res.json({ text: out.text, model: out.model });
+  });
+
+  // Streaming proxy for the teacher co-pilot. Relays Anthropic's raw SSE
+  // chunks straight through; the browser's SSEParser owns the wire format.
+  // The server key never leaves the server.
+  app.post("/api/ai/stream", auth, async (req: AuthedRequest, res: Response) => {
+    const parsed = aiMessageSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "systemPrompt and userPrompt are required." });
+    }
+    const out = await streamer(anthropicApiKey, parsed.data);
+    if (!out.ok) return res.status(out.status).json({ error: out.error });
+
+    res.status(200);
+    res.setHeader("content-type", "text/event-stream");
+    res.setHeader("cache-control", "no-cache, no-transform");
+    res.setHeader("connection", "keep-alive");
+    res.flushHeaders?.();
+    try {
+      for await (const chunk of out.stream) {
+        res.write(chunk);
+      }
+    } catch {
+      // Upstream dropped mid-stream — send a terminal SSE error frame the
+      // client's parser understands, then end.
+      res.write(
+        `event: error\ndata: ${JSON.stringify({ type: "error", error: { type: "stream_error", message: "Upstream stream interrupted." } })}\n\n`,
+      );
+    } finally {
+      res.end();
+    }
   });
 
   return app;

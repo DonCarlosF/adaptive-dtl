@@ -81,3 +81,62 @@ export async function proxyAnthropic(
     clearTimeout(timer);
   }
 }
+
+export type StreamResult =
+  | { ok: true; stream: AsyncIterable<string> }
+  | { ok: false; status: number; error: string };
+
+/**
+ * Streaming variant: opens an Anthropic SSE stream and returns it as an
+ * async-iterable of RAW text chunks. The route relays these straight to the
+ * browser, where the single SSE parser (src/ai/sseParser.ts) owns the wire
+ * format. The key still never leaves the server.
+ */
+export async function streamAnthropic(
+  apiKey: string,
+  params: ProxyParams,
+): Promise<StreamResult> {
+  if (!apiKey) {
+    return { ok: false, status: 503, error: "Server is not configured with an API key." };
+  }
+  let res: Response;
+  try {
+    res = await fetch(ENDPOINT, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": ANTHROPIC_VERSION,
+      },
+      body: JSON.stringify({
+        model: params.model ?? DEFAULT_MODEL,
+        max_tokens: params.maxTokens ?? 2048,
+        stream: true,
+        system: params.systemPrompt,
+        messages: [{ role: "user", content: params.userPrompt }],
+      }),
+    });
+  } catch (err) {
+    return { ok: false, status: 502, error: (err as Error).message ?? "Network error." };
+  }
+  if (!res.ok || !res.body) {
+    const body = await res.text().catch(() => "");
+    return {
+      ok: false,
+      status: res.status || 502,
+      error: `Anthropic returned ${res.status}: ${body.slice(0, 200)}`,
+    };
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  const stream: AsyncIterable<string> = {
+    async *[Symbol.asyncIterator]() {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        yield decoder.decode(value, { stream: true });
+      }
+    },
+  };
+  return { ok: true, stream };
+}
