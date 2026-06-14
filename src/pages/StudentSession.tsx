@@ -27,6 +27,17 @@ import { applyGazeRules, GazeWindow } from "@/engine/gazeRules";
 import { buildSessionRecord } from "@/engine/sessionLogger";
 import { sessionRepo } from "@/db/sessionRepo";
 import { settingsRepo } from "@/db/settingsRepo";
+// --- ML adaptation: additive on-device ML layer. See src/ml/README.md. ---
+import { scoreAttention } from "@/ml/attentionModel";
+import {
+  DifficultyModel,
+  initModel,
+  recommend,
+  update as updateMlModel,
+} from "@/ml/difficultyModel";
+import { buildDifficultyFeatures } from "@/ml/sessionFeatures";
+import { mlModelRepo } from "@/db/mlModelRepo";
+// --------------------------------------------------------------------------
 import { ChoiceGrid, ChoiceItem } from "@/components/ChoiceGrid";
 import { LongPressExit } from "@/components/LongPressExit";
 import { Reinforcer } from "@/components/Reinforcer";
@@ -85,6 +96,10 @@ export function StudentSession({ student, domain, onExit }: Props) {
   const promptElRef = useRef<HTMLParagraphElement | null>(null);
   const choiceContainerElRef = useRef<HTMLDivElement | null>(null);
   const lastBreakAtRef = useRef<number>(0);
+  // --- ML adaptation: per-(student, domain) model trains across the whole
+  // session in this ref (mutable so per-trial updates don't re-render); loaded
+  // on mount, persisted on session-done. ---
+  const mlModelRef = useRef<DifficultyModel>(initModel());
 
   const { speak, cancel: cancelSpeech } = useSpeak();
   const { chime } = useChime();
@@ -118,6 +133,9 @@ export function StudentSession({ student, domain, onExit }: Props) {
         await useGazeStore.getState().enable(settings.cameraTracking);
         useGazeStore.getState().resetBuffer();
       }
+      // --- ML adaptation: load this student's cross-session model. ---
+      const model = await mlModelRepo.getModel(student.id, domain);
+      if (!cancelled) mlModelRef.current = model;
     })();
     return () => {
       cancelled = true;
@@ -320,6 +338,72 @@ export function StudentSession({ student, domain, onExit }: Props) {
         mergedDecision = { ...decision, ...(out.decisionPatch ?? {}) };
       }
 
+      // --- ML adaptation: advisory, strictly additive. Score engagement from
+      // the gaze buffer, ask the difficulty model, log it, and bias numChoices
+      // ONLY in the safe direction — never reversing a safety drop/early-end.
+      // Then train the model on this trial's actual outcome. ---
+      {
+        const attnSamples = eyeTrackingOn ? useGazeStore.getState().buffer : [];
+        const attention = scoreAttention(attnSamples, {
+          width: window.innerWidth,
+          height: window.innerHeight,
+        });
+        const features = buildDifficultyFeatures({
+          trials: mergedNext.trials,
+          attentionScore: attention.score,
+          numChoices: mergedDecision.numChoices,
+          errorlessHighlight: mergedDecision.errorlessHighlight,
+        });
+        const mlDecision = recommend(mlModelRef.current, features);
+
+        let mlNumChoices = mergedDecision.numChoices;
+        const rulesForcedEasier =
+          mergedDecision.errorlessHighlight || next.numChoices < state.numChoices;
+        const MIN_CONFIDENCE = 0.4;
+        let mlActed = false;
+        if (mlDecision.confidence >= MIN_CONFIDENCE && !mergedDecision.endEarly) {
+          if (mlDecision.recommendation === "lower" && mlNumChoices > 2) {
+            mlNumChoices = (mlNumChoices - 1) as 2 | 3 | 4;
+            mlActed = true;
+          } else if (
+            mlDecision.recommendation === "raise" &&
+            mlNumChoices < 4 &&
+            !rulesForcedEasier &&
+            mlDecision.confidence >= 0.6
+          ) {
+            mlNumChoices = (mlNumChoices + 1) as 2 | 3 | 4;
+            mlActed = true;
+          }
+        }
+
+        const mlAdaptations: AdaptationEvent[] = mlActed
+          ? [
+              {
+                kind:
+                  mlDecision.recommendation === "lower"
+                    ? "decrease-choices"
+                    : "increase-choices",
+                trialIndex: result.index,
+                reason: mlDecision.reason,
+                timestamp: Date.now(),
+              },
+            ]
+          : [];
+
+        mergedDecision = { ...mergedDecision, numChoices: mlNumChoices };
+        mergedNext = {
+          ...mergedNext,
+          numChoices: mlNumChoices,
+          adaptations: [...mergedNext.adaptations, ...mlAdaptations],
+        };
+
+        // Train on the clean-success signal: an incorrect tap re-prompts with
+        // the errorless highlight rather than recording a miss, so a clean
+        // answer (no highlight) is the positive outcome we learn on.
+        const cleanSuccess = result.correct && !result.errorlessHighlight;
+        mlModelRef.current = updateMlModel(mlModelRef.current, features, cleanSuccess);
+      }
+
       setState(mergedNext);
       setPhase({ kind: "feedback", correct: true });
 
@@ -385,7 +469,10 @@ export function StudentSession({ student, domain, onExit }: Props) {
       rec.gazeTrace = traceRef.current.slice();
     }
     sessionRepo.save(rec);
-  }, [phase, state, trialSource, eyeTrackingOn]);
+    // --- ML adaptation: persist the model trained this session so it carries
+    // forward to the student's next session. ---
+    mlModelRepo.saveModel(student.id, domain, mlModelRef.current);
+  }, [phase, state, trialSource, eyeTrackingOn, student.id, domain]);
 
   const resumeFromBreak = useCallback(() => {
     presentTrial(state, templates);

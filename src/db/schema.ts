@@ -1,5 +1,6 @@
 import Dexie, { Table } from "dexie";
 import { AIGeneratedSet, SessionRecord, StudentProfile } from "@/engine/types";
+import type { MLModelRecord } from "./mlModelRepo";
 
 export interface AppSettings {
   id: "app";
@@ -20,6 +21,10 @@ export interface AppSettings {
   switchScanning: boolean;
   /** Dwell time per item (ms) when switch scanning is on. */
   switchScanIntervalMs: number;
+  /** Accept spoken answers via the Web Speech API during trials. */
+  voiceInput: boolean;
+  /** Show the AAC core-vocabulary board during sessions. */
+  aacBoard: boolean;
 }
 
 class AdaptiveDB extends Dexie {
@@ -27,6 +32,7 @@ class AdaptiveDB extends Dexie {
   sessions!: Table<SessionRecord, string>;
   settings!: Table<AppSettings, "app">;
   aiGenerated!: Table<AIGeneratedSet, string>;
+  mlModels!: Table<MLModelRecord, string>;
 
   constructor() {
     super("adaptive-dtl");
@@ -41,6 +47,17 @@ class AdaptiveDB extends Dexie {
       sessions: "id, studentId, domain, startedAt",
       settings: "id",
       aiGenerated: "id, [studentId+domain], generatedAt",
+    });
+    // v3: add per-(student, domain) on-device ML models. Primary key `id`
+    // is the composite `${studentId}::${domain}`; the compound index mirrors
+    // the aiGenerated table. No data migration — the table starts empty and
+    // fills lazily as students complete sessions.
+    this.version(3).stores({
+      students: "id, name, createdAt",
+      sessions: "id, studentId, domain, startedAt",
+      settings: "id",
+      aiGenerated: "id, [studentId+domain], generatedAt",
+      mlModels: "id, [studentId+domain], updatedAt",
     });
   }
 }
@@ -58,4 +75,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   apiKey: "",
   switchScanning: false,
   switchScanIntervalMs: 1500,
+  voiceInput: false,
+  aacBoard: false,
 };
