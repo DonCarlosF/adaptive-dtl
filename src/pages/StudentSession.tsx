@@ -48,6 +48,12 @@ import { GazeIndicator } from "@/components/GazeIndicator";
 import { useSpeak } from "@/hooks/useSpeak";
 import { useChime } from "@/hooks/useChime";
 import { useSwitchScanning } from "@/hooks/useSwitchScanning";
+// --- PWA/Voice/AAC branch additions ---
+import { useSpeechRecognition } from "@/voice/useSpeechRecognition";
+import { AACBoard } from "@/components/AACBoard";
+import { usePrefersReducedMotion } from "@/a11y/usePrefersReducedMotion";
+import { Mic, MessageSquare } from "lucide-react";
+// --- end additions ---
 import { loadTrialsForSession } from "@/ai/activityGenerator";
 import { getDomain } from "@/domains/registry";
 import {
@@ -89,6 +95,11 @@ export function StudentSession({ student, domain, onExit }: Props) {
   const [showGazeIndicator, setShowGazeIndicator] = useState(false);
   const [switchScanning, setSwitchScanning] = useState(false);
   const [switchScanIntervalMs, setSwitchScanIntervalMs] = useState(1500);
+  // --- PWA/Voice/AAC branch additions ---
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [aacEnabled, setAacEnabled] = useState(false);
+  const [aacOpen, setAacOpen] = useState(false);
+  // --- end additions ---
 
   const startedAtRef = useRef<number>(Date.now());
   const sessionPersistedRef = useRef(false);
@@ -131,6 +142,10 @@ export function StudentSession({ student, domain, onExit }: Props) {
         settings.switchScanning || student.responseMethod === "eye gaze",
       );
       setSwitchScanIntervalMs(settings.switchScanIntervalMs);
+      // --- PWA/Voice/AAC branch additions ---
+      setVoiceEnabled(settings.voiceInput);
+      setAacEnabled(settings.aacBoard);
+      // --- end additions ---
       if (settings.eyeTrackingEnabled) {
         // Start gaze tracking for this session — real camera when opted in,
         // simulated otherwise (with automatic fallback).
@@ -547,6 +562,55 @@ export function StudentSession({ student, domain, onExit }: Props) {
     presentTrial(state, templates);
   }, [presentTrial, state, templates]);
 
+  // --- PWA/Voice/AAC branch additions ---
+  const reduceMotion = usePrefersReducedMotion();
+
+  // Labelled choices for the current trial, used for voice matching.
+  const voiceChoices = useMemo(
+    () =>
+      phase.kind === "trial"
+        ? phase.trial.choiceIds.map((id) => ({ id, label: dom.ariaLabel(id) }))
+        : [],
+    [phase, dom],
+  );
+
+  // Spoken-answer input. A confident match routes through the same
+  // handleChoose path as a touch/scan selection. Inert no-op when the
+  // browser lacks SpeechRecognition (supported === false).
+  const speech = useSpeechRecognition({
+    choices: voiceChoices,
+    onMatch: (m) => handleChoose(m.id),
+  });
+
+  // Listen only while a trial is unlocked (prompt finished speaking) so we
+  // never capture the app's own TTS as input.
+  const trialUnlocked = phase.kind === "trial" && phase.startedAt !== 0;
+  useEffect(() => {
+    if (!voiceEnabled || !speech.supported) return;
+    if (trialUnlocked) speech.start();
+    else speech.stop();
+    // speech.start/stop are stable (useCallback); phase drives this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceEnabled, speech.supported, trialUnlocked]);
+
+  // AAC "break"/"help" → drop into the calm break screen.
+  const goToBreak = useCallback(() => {
+    setAacOpen(false);
+    if (phase.kind === "break" || phase.kind === "done") return;
+    cancelSpeech();
+    lastBreakAtRef.current = Date.now();
+    setPhase({ kind: "break" });
+    speak("Take a moment. We can keep going when you're ready.", {
+      volume: audioVolume,
+    });
+  }, [phase.kind, cancelSpeech, speak, audioVolume]);
+
+  // AAC "again" → re-read the current prompt.
+  const rereadPrompt = useCallback(() => {
+    if (phase.kind === "trial") speak(phase.trial.prompt, { volume: audioVolume });
+  }, [phase, speak, audioVolume]);
+  // --- end additions ---
+
   const containerClass = highContrast
     ? "fixed inset-0 bg-white text-black"
     : "fixed inset-0 bg-canvas text-ink";
@@ -605,6 +669,42 @@ export function StudentSession({ student, domain, onExit }: Props) {
 
       {/* realtime co-presence: small join-code chip for the teacher's monitor. */}
       {joinCode && <JoinCodeChip code={joinCode} watching={teacherWatching} />}
+
+      {/* --- PWA/Voice/AAC branch additions --- */}
+      {/* Listening indicator: visible cue + SR announcement of interim text. */}
+      {voiceEnabled && speech.supported && speech.listening && (
+        <div
+          className="absolute bottom-4 left-4 inline-flex items-center gap-2 rounded-full bg-sage-50 border border-sage-200 px-3 py-1.5 text-sage-600 text-xs"
+          role="status"
+        >
+          <Mic size={14} className={reduceMotion ? undefined : "animate-pulse"} />
+          <span>Listening{speech.transcript ? `: "${speech.transcript}"` : "…"}</span>
+        </div>
+      )}
+
+      {/* AAC board toggle — only while a session is active. */}
+      {aacEnabled && (phase.kind === "trial" || phase.kind === "break") && (
+        <button
+          onClick={() => setAacOpen(true)}
+          aria-label="Open communication board"
+          className="absolute bottom-4 right-4 inline-flex items-center gap-2 rounded-full bg-white border border-line shadow-tile px-4 py-2 text-sm text-ink hover:bg-sage-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-sage-500"
+        >
+          <MessageSquare size={16} className="text-sage-600" />
+          Talk
+        </button>
+      )}
+
+      {aacEnabled && (
+        <AACBoard
+          open={aacOpen}
+          onClose={() => setAacOpen(false)}
+          onBreak={goToBreak}
+          onAgain={rereadPrompt}
+          onDone={() => setAacOpen(false)}
+          volume={audioVolume}
+        />
+      )}
+      {/* --- end additions --- */}
     </div>
   );
 }
@@ -673,6 +773,9 @@ function TrialView({
     <div className="w-full max-w-5xl">
       <p
         ref={promptRef}
+        // a11y: announce the prompt to assistive tech as it changes.
+        role="status"
+        aria-live="polite"
         className="text-center text-2xl md:text-3xl text-ink mb-10 font-medium"
       >
         {trial.prompt}

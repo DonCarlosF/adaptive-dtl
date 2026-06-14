@@ -316,6 +316,27 @@ export function Settings({ onBack, onLogout }: Props) {
               />
             }
           />
+          {/* --- PWA/Voice/AAC branch additions: alternative input methods --- */}
+          <Row
+            label="Voice input (spoken answers)"
+            help="When supported, the learner can say a choice out loud during a trial. Requires microphone permission; degrades to a no-op where unavailable."
+            control={
+              <Toggle
+                checked={s.voiceInput}
+                onChange={(v) => update({ voiceInput: v })}
+              />
+            }
+          />
+          <Row
+            label="AAC communication board"
+            help="Adds a tap-to-talk button in sessions with core words (yes, no, more, stop, help, break, again, done) that speak aloud."
+            control={
+              <Toggle
+                checked={s.aacBoard}
+                onChange={(v) => update({ aacBoard: v })}
+              />
+            }
+          />
           <Row
             label={`Audio volume: ${Math.round(s.audioVolume * 100)}%`}
             control={

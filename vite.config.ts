@@ -1,6 +1,7 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import { VitePWA } from "vite-plugin-pwa";
 import path from "node:path";
 
 /**
@@ -13,7 +14,50 @@ import path from "node:path";
  *   files so the initial dashboard payload doesn't ship Recharts or Zod.
  */
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    // --- PWA (installable, offline-first) ---
+    // Auto-registers a Workbox service worker that precaches the app shell.
+    // The app is local-first (IndexedDB), so the dashboard + sessions work
+    // fully offline once installed. The WebGazer CDN script is deliberately
+    // NOT precached so it degrades gracefully when offline.
+    VitePWA({
+      registerType: "autoUpdate",
+      includeAssets: ["favicon.svg", "icon.svg", "apple-touch-icon.png"],
+      manifest: {
+        name: "Adaptive DTL — Discrete-Trial Learning",
+        short_name: "Adaptive DTL",
+        description:
+          "Adaptive discrete-trial learning for special education. Local-first, offline-capable, with voice, AAC, and accessibility built in.",
+        theme_color: "#7BA098",
+        background_color: "#FAF7F2",
+        display: "standalone",
+        orientation: "any",
+        start_url: "/",
+        scope: "/",
+        lang: "en",
+        categories: ["education", "accessibility"],
+        icons: [
+          { src: "pwa-192x192.png", sizes: "192x192", type: "image/png" },
+          { src: "pwa-512x512.png", sizes: "512x512", type: "image/png" },
+          {
+            src: "maskable-512x512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable",
+          },
+        ],
+      },
+      workbox: {
+        globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"],
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        // Never intercept the external WebGazer CDN script — let the network
+        // serve it when online and fail soft when offline.
+        navigateFallbackDenylist: [/^\/api/, /webgazer/i],
+      },
+      devOptions: { enabled: false },
+    }),
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

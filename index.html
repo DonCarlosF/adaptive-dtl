@@ -3,8 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- PWA: home-screen / install affordances (manifest injected by vite-plugin-pwa). -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Adaptive DTL" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#FAF7F2" />
+    <meta
+      name="description"
+      content="Adaptive discrete-trial learning for special education — local-first, offline-capable, with voice, AAC, and accessibility built in."
+    />
+    <!-- Calm sage to match the standalone window chrome / manifest theme_color. -->
+    <meta name="theme-color" content="#7BA098" />
     <title>Adaptive DTL — Discrete-Trial Learning</title>
   </head>
   <body class="bg-canvas text-ink antialiased">
