@@ -97,6 +97,10 @@ describe("Copilot drawer", () => {
       screen.getByText(/identifies common sight words/i),
     ).toBeInTheDocument();
     expect(screen.getByText(/data confidence: low/i)).toBeInTheDocument();
+    // IEP drafts always use the deeper model regardless of the chat toggle.
+    expect(streamAnthropic).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "claude-opus-4-8" }),
+    );
   });
 
   it("shows a clean error when an IEP draft fails validation", async () => {

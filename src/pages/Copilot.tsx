@@ -27,11 +27,18 @@ interface Props {
   onClose: () => void;
 }
 
-/** Stronger model offered for the co-pilot; default stays sonnet elsewhere. */
+/** Models offered for the chat toggle; chat defaults to fast Sonnet. */
 const COPILOT_MODELS = [
   { id: "claude-sonnet-4-6", label: "Sonnet (fast)" },
   { id: "claude-opus-4-8", label: "Opus (deeper)" },
 ] as const;
+
+/**
+ * IEP progress notes always use the deepest model regardless of the chat
+ * toggle — the output is clinical-adjacent structured text that benefits
+ * from the stronger model, and it's a low-frequency, high-stakes action.
+ */
+const IEP_MODEL = "claude-opus-4-8";
 
 interface ChatTurn {
   role: "teacher" | "copilot";
@@ -164,11 +171,10 @@ export function Copilot({ student, onClose }: Props) {
 
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    // IEP draft uses the deeper model regardless of the chat toggle —
-    // structured clinical-adjacent text benefits from it.
+    // IEP draft uses the deeper model regardless of the chat toggle (see IEP_MODEL).
     const out = await streamAnthropic({
       apiKey: apiKey.trim() || undefined,
-      model: "claude-opus-4-8",
+      model: IEP_MODEL,
       systemPrompt: prompts.IEP_SYSTEM_PROMPT,
       userPrompt: prompts.buildIepUserPrompt(ctx),
       maxTokens: 1500,
@@ -263,10 +269,15 @@ export function Copilot({ student, onClose }: Props) {
               variant="secondary"
               onClick={draftIep}
               disabled={!ctx || busy}
-              title="Generate a structured IEP progress-note draft from the data"
+              title={`Generate a structured IEP progress-note draft from the data (uses ${
+                COPILOT_MODELS.find((m) => m.id === IEP_MODEL)?.label ?? IEP_MODEL
+              })`}
             >
               <FileText size={14} /> Draft IEP progress note
             </Button>
+            <span className="text-xs text-muted">
+              uses {COPILOT_MODELS.find((m) => m.id === IEP_MODEL)?.label ?? IEP_MODEL}
+            </span>
             {busy && (
               <Button size="sm" variant="ghost" onClick={stop}>
                 <StopCircle size={14} /> Stop
