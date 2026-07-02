@@ -1,5 +1,11 @@
 import { AIGeneratedSet, DomainId } from "@/engine/types";
 import { db } from "./schema";
+import { getToken, isCloudEnabled } from "@/api/client";
+import { cloudAiGeneratedRepo } from "@/api/cloudRepos";
+
+function useCloud(): boolean {
+  return isCloudEnabled() && getToken() !== null;
+}
 
 export const aiGeneratedRepo = {
   async byKey(
@@ -7,6 +13,7 @@ export const aiGeneratedRepo = {
     domain: DomainId,
     contentHash: string,
   ): Promise<AIGeneratedSet | undefined> {
+    if (useCloud()) return cloudAiGeneratedRepo.byKey(studentId, domain, contentHash);
     const id = makeId(studentId, domain, contentHash);
     return db.aiGenerated.get(id);
   },
@@ -15,6 +22,7 @@ export const aiGeneratedRepo = {
     studentId: string,
     domain: DomainId,
   ): Promise<AIGeneratedSet | undefined> {
+    if (useCloud()) return cloudAiGeneratedRepo.latestFor(studentId, domain);
     const all = await db.aiGenerated
       .where("[studentId+domain]")
       .equals([studentId, domain])
@@ -24,6 +32,7 @@ export const aiGeneratedRepo = {
   },
 
   async save(set: AIGeneratedSet): Promise<void> {
+    if (useCloud()) return cloudAiGeneratedRepo.save(set);
     await db.aiGenerated.put(set);
   },
 

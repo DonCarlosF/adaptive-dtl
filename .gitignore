@@ -30,5 +30,8 @@ lighthouse.json
 # Vite cache
 .vite/
 
+# Claude Code agent worktrees / local runtime state
+.claude/
+
 # TypeScript incremental build cache
 *.tsbuildinfo

@@ -27,6 +27,17 @@ import { applyGazeRules, GazeWindow } from "@/engine/gazeRules";
 import { buildSessionRecord } from "@/engine/sessionLogger";
 import { sessionRepo } from "@/db/sessionRepo";
 import { settingsRepo } from "@/db/settingsRepo";
+// --- ML adaptation: additive on-device ML layer. See src/ml/README.md. ---
+import { scoreAttention } from "@/ml/attentionModel";
+import {
+  DifficultyModel,
+  initModel,
+  recommend,
+  update as updateMlModel,
+} from "@/ml/difficultyModel";
+import { buildDifficultyFeatures } from "@/ml/sessionFeatures";
+import { mlModelRepo } from "@/db/mlModelRepo";
+// --------------------------------------------------------------------------
 import { ChoiceGrid, ChoiceItem } from "@/components/ChoiceGrid";
 import { LongPressExit } from "@/components/LongPressExit";
 import { Reinforcer } from "@/components/Reinforcer";
@@ -36,6 +47,13 @@ import { ProgressRing } from "@/components/ProgressRing";
 import { GazeIndicator } from "@/components/GazeIndicator";
 import { useSpeak } from "@/hooks/useSpeak";
 import { useChime } from "@/hooks/useChime";
+import { useSwitchScanning } from "@/hooks/useSwitchScanning";
+// --- PWA/Voice/AAC branch additions ---
+import { useSpeechRecognition } from "@/voice/useSpeechRecognition";
+import { AACBoard } from "@/components/AACBoard";
+import { usePrefersReducedMotion } from "@/a11y/usePrefersReducedMotion";
+import { Mic, MessageSquare } from "lucide-react";
+// --- end additions ---
 import { loadTrialsForSession } from "@/ai/activityGenerator";
 import { getDomain } from "@/domains/registry";
 import {
@@ -43,6 +61,10 @@ import {
   useGazeStore,
 } from "@/eyetracking/gazeStore";
 import { Sparkles } from "lucide-react";
+// --- realtime co-presence: imports ---
+import { useSessionBroadcast } from "@/realtime/useSessionBroadcast";
+import type { Snapshot } from "@/realtime/protocol";
+// --- end realtime co-presence ---
 
 interface Props {
   student: StudentProfile;
@@ -71,6 +93,13 @@ export function StudentSession({ student, domain, onExit }: Props) {
   const [highContrast, setHighContrast] = useState(false);
   const [eyeTrackingOn, setEyeTrackingOn] = useState(false);
   const [showGazeIndicator, setShowGazeIndicator] = useState(false);
+  const [switchScanning, setSwitchScanning] = useState(false);
+  const [switchScanIntervalMs, setSwitchScanIntervalMs] = useState(1500);
+  // --- PWA/Voice/AAC branch additions ---
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [aacEnabled, setAacEnabled] = useState(false);
+  const [aacOpen, setAacOpen] = useState(false);
+  // --- end additions ---
 
   const startedAtRef = useRef<number>(Date.now());
   const sessionPersistedRef = useRef(false);
@@ -82,6 +111,10 @@ export function StudentSession({ student, domain, onExit }: Props) {
   const promptElRef = useRef<HTMLParagraphElement | null>(null);
   const choiceContainerElRef = useRef<HTMLDivElement | null>(null);
   const lastBreakAtRef = useRef<number>(0);
+  // --- ML adaptation: per-(student, domain) model trains across the whole
+  // session in this ref (mutable so per-trial updates don't re-render); loaded
+  // on mount, persisted on session-done. ---
+  const mlModelRef = useRef<DifficultyModel>(initModel());
 
   const { speak, cancel: cancelSpeech } = useSpeak();
   const { chime } = useChime();
@@ -103,15 +136,31 @@ export function StudentSession({ student, domain, onExit }: Props) {
       setHighContrast(settings.highContrast);
       setEyeTrackingOn(settings.eyeTrackingEnabled);
       setShowGazeIndicator(settings.gazeIndicatorEnabled);
+      // Switch scanning is the natural input for "eye gaze" / "both" profiles
+      // and anyone the teacher has turned it on for.
+      setSwitchScanning(
+        settings.switchScanning || student.responseMethod === "eye gaze",
+      );
+      setSwitchScanIntervalMs(settings.switchScanIntervalMs);
+      // --- PWA/Voice/AAC branch additions ---
+      setVoiceEnabled(settings.voiceInput);
+      setAacEnabled(settings.aacBoard);
+      // --- end additions ---
       if (settings.eyeTrackingEnabled) {
-        // Ensure the simulator is running for this session.
-        useGazeStore.getState().setEnabled(true);
+        // Start gaze tracking for this session — real camera when opted in,
+        // simulated otherwise (with automatic fallback).
+        await useGazeStore.getState().enable(settings.cameraTracking);
         useGazeStore.getState().resetBuffer();
       }
+      // --- ML adaptation: load this student's cross-session model. ---
+      const model = await mlModelRepo.getModel(student.id, domain);
+      if (!cancelled) mlModelRef.current = model;
     })();
     return () => {
       cancelled = true;
       cancelSpeech();
+      // Release the camera / stop the stream when the session unmounts.
+      useGazeStore.getState().disable();
     };
   }, [domain, student, cancelSpeech]);
 
@@ -308,6 +357,72 @@ export function StudentSession({ student, domain, onExit }: Props) {
         mergedDecision = { ...decision, ...(out.decisionPatch ?? {}) };
       }
 
+      // --- ML adaptation: advisory, strictly additive. Score engagement from
+      // the gaze buffer, ask the difficulty model, log it, and bias numChoices
+      // ONLY in the safe direction — never reversing a safety drop/early-end.
+      // Then train the model on this trial's actual outcome. ---
+      {
+        const attnSamples = eyeTrackingOn ? useGazeStore.getState().buffer : [];
+        const attention = scoreAttention(attnSamples, {
+          width: window.innerWidth,
+          height: window.innerHeight,
+        });
+        const features = buildDifficultyFeatures({
+          trials: mergedNext.trials,
+          attentionScore: attention.score,
+          numChoices: mergedDecision.numChoices,
+          errorlessHighlight: mergedDecision.errorlessHighlight,
+        });
+        const mlDecision = recommend(mlModelRef.current, features);
+
+        let mlNumChoices = mergedDecision.numChoices;
+        const rulesForcedEasier =
+          mergedDecision.errorlessHighlight || next.numChoices < state.numChoices;
+        const MIN_CONFIDENCE = 0.4;
+        let mlActed = false;
+        if (mlDecision.confidence >= MIN_CONFIDENCE && !mergedDecision.endEarly) {
+          if (mlDecision.recommendation === "lower" && mlNumChoices > 2) {
+            mlNumChoices = (mlNumChoices - 1) as 2 | 3 | 4;
+            mlActed = true;
+          } else if (
+            mlDecision.recommendation === "raise" &&
+            mlNumChoices < 4 &&
+            !rulesForcedEasier &&
+            mlDecision.confidence >= 0.6
+          ) {
+            mlNumChoices = (mlNumChoices + 1) as 2 | 3 | 4;
+            mlActed = true;
+          }
+        }
+
+        const mlAdaptations: AdaptationEvent[] = mlActed
+          ? [
+              {
+                kind:
+                  mlDecision.recommendation === "lower"
+                    ? "decrease-choices"
+                    : "increase-choices",
+                trialIndex: result.index,
+                reason: mlDecision.reason,
+                timestamp: Date.now(),
+              },
+            ]
+          : [];
+
+        mergedDecision = { ...mergedDecision, numChoices: mlNumChoices };
+        mergedNext = {
+          ...mergedNext,
+          numChoices: mlNumChoices,
+          adaptations: [...mergedNext.adaptations, ...mlAdaptations],
+        };
+
+        // Train on the clean-success signal: an incorrect tap re-prompts with
+        // the errorless highlight rather than recording a miss, so a clean
+        // answer (no highlight) is the positive outcome we learn on.
+        const cleanSuccess = result.correct && !result.errorlessHighlight;
+        mlModelRef.current = updateMlModel(mlModelRef.current, features, cleanSuccess);
+      }
+
       setState(mergedNext);
       setPhase({ kind: "feedback", correct: true });
 
@@ -345,6 +460,88 @@ export function StudentSession({ student, domain, onExit }: Props) {
     ],
   );
 
+  // Single-switch scanning input. Active only during an unlocked trial;
+  // a switch activation (Space/Enter or the on-screen Select button)
+  // chooses whichever tile is currently highlighted.
+  const scanActive = phase.kind === "trial" && phase.startedAt !== 0;
+  const scanCount = phase.kind === "trial" ? phase.trial.choiceIds.length : 0;
+  const { index: scanIndex, select: scanSelect } = useSwitchScanning({
+    enabled: switchScanning,
+    count: scanCount,
+    intervalMs: switchScanIntervalMs,
+    active: scanActive,
+    onSelect: (i) => {
+      if (phase.kind !== "trial") return;
+      const id = phase.trial.choiceIds[i];
+      if (id) handleChoose(id);
+    },
+  });
+
+  // --- realtime co-presence: broadcast + remote control (additive) ---
+  // The teacher's live monitor mirrors this session and can steer it. All of
+  // the co-presence wiring funnels through the single hook below; it no-ops
+  // entirely when the cloud backend isn't configured.
+  const latestGaze = useGazeStore((s) => s.latest);
+
+  const broadcastSnapshot = useMemo<Snapshot | null>(() => {
+    const correct = state.trials.filter((t) => t.correct).length;
+    return {
+      phase: phase.kind,
+      domain,
+      trialIndex: state.trials.length,
+      plannedTrials: PLANNED_TRIALS_PER_SESSION,
+      correct,
+      numChoices: state.numChoices,
+      errorlessHighlight: state.errorlessHighlight,
+      gaze:
+        eyeTrackingOn && latestGaze
+          ? {
+              x: latestGaze.x,
+              y: latestGaze.y,
+              confidence: latestGaze.confidence,
+              vw: window.innerWidth,
+              vh: window.innerHeight,
+            }
+          : null,
+      lastAdaptation: state.adaptations.at(-1)
+        ? {
+            kind: state.adaptations.at(-1)!.kind,
+            reason: state.adaptations.at(-1)!.reason,
+            timestamp: state.adaptations.at(-1)!.timestamp,
+          }
+        : null,
+    };
+  }, [phase.kind, state, domain, eyeTrackingOn, latestGaze]);
+
+  const handleRemoteControl = useCallback(
+    (control: { control: string; numChoices?: 2 | 3 | 4 }) => {
+      if (control.control === "force-break") {
+        if (phase.kind === "done") return;
+        lastBreakAtRef.current = Date.now();
+        cancelSpeech();
+        setPhase({ kind: "break" });
+        speak("Take a moment. We can keep going when you're ready.", {
+          volume: audioVolume,
+        });
+      } else if (
+        control.control === "set-num-choices" &&
+        control.numChoices != null
+      ) {
+        setState((s) => ({ ...s, numChoices: control.numChoices! }));
+      } else if (control.control === "end-session") {
+        cancelSpeech();
+        setPhase({ kind: "done", endedEarly: true });
+      }
+    },
+    [phase.kind, audioVolume, speak, cancelSpeech],
+  );
+
+  const { joinCode, teacherWatching } = useSessionBroadcast(
+    { enabled: phase.kind !== "done", snapshot: broadcastSnapshot },
+    handleRemoteControl,
+  );
+  // --- end realtime co-presence ---
+
   // Persist session when we hit "done".
   useEffect(() => {
     if (phase.kind !== "done") return;
@@ -356,11 +553,63 @@ export function StudentSession({ student, domain, onExit }: Props) {
       rec.gazeTrace = traceRef.current.slice();
     }
     sessionRepo.save(rec);
-  }, [phase, state, trialSource, eyeTrackingOn]);
+    // --- ML adaptation: persist the model trained this session so it carries
+    // forward to the student's next session. ---
+    mlModelRepo.saveModel(student.id, domain, mlModelRef.current);
+  }, [phase, state, trialSource, eyeTrackingOn, student.id, domain]);
 
   const resumeFromBreak = useCallback(() => {
     presentTrial(state, templates);
   }, [presentTrial, state, templates]);
+
+  // --- PWA/Voice/AAC branch additions ---
+  const reduceMotion = usePrefersReducedMotion();
+
+  // Labelled choices for the current trial, used for voice matching.
+  const voiceChoices = useMemo(
+    () =>
+      phase.kind === "trial"
+        ? phase.trial.choiceIds.map((id) => ({ id, label: dom.ariaLabel(id) }))
+        : [],
+    [phase, dom],
+  );
+
+  // Spoken-answer input. A confident match routes through the same
+  // handleChoose path as a touch/scan selection. Inert no-op when the
+  // browser lacks SpeechRecognition (supported === false).
+  const speech = useSpeechRecognition({
+    choices: voiceChoices,
+    onMatch: (m) => handleChoose(m.id),
+  });
+
+  // Listen only while a trial is unlocked (prompt finished speaking) so we
+  // never capture the app's own TTS as input.
+  const trialUnlocked = phase.kind === "trial" && phase.startedAt !== 0;
+  useEffect(() => {
+    if (!voiceEnabled || !speech.supported) return;
+    if (trialUnlocked) speech.start();
+    else speech.stop();
+    // speech.start/stop are stable (useCallback); phase drives this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceEnabled, speech.supported, trialUnlocked]);
+
+  // AAC "break"/"help" → drop into the calm break screen.
+  const goToBreak = useCallback(() => {
+    setAacOpen(false);
+    if (phase.kind === "break" || phase.kind === "done") return;
+    cancelSpeech();
+    lastBreakAtRef.current = Date.now();
+    setPhase({ kind: "break" });
+    speak("Take a moment. We can keep going when you're ready.", {
+      volume: audioVolume,
+    });
+  }, [phase.kind, cancelSpeech, speak, audioVolume]);
+
+  // AAC "again" → re-read the current prompt.
+  const rereadPrompt = useCallback(() => {
+    if (phase.kind === "trial") speak(phase.trial.prompt, { volume: audioVolume });
+  }, [phase, speak, audioVolume]);
+  // --- end additions ---
 
   const containerClass = highContrast
     ? "fixed inset-0 bg-white text-black"
@@ -385,6 +634,7 @@ export function StudentSession({ student, domain, onExit }: Props) {
             ariaLabel={dom.ariaLabel}
             promptRef={promptElRef}
             choiceContainerRef={choiceContainerElRef}
+            scanIndex={switchScanning ? scanIndex : -1}
           />
         )}
 
@@ -406,6 +656,72 @@ export function StudentSession({ student, domain, onExit }: Props) {
       </div>
 
       {eyeTrackingOn && <GazeIndicator enabled={showGazeIndicator} />}
+
+      {switchScanning && scanActive && (
+        <button
+          onClick={scanSelect}
+          aria-label="Select the highlighted choice"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 h-20 px-12 rounded-tile bg-sky-500 text-white text-xl font-semibold shadow-card hover:bg-sky-600 active:bg-sky-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-sky-200 select-none"
+        >
+          Select
+        </button>
+      )}
+
+      {/* realtime co-presence: small join-code chip for the teacher's monitor. */}
+      {joinCode && <JoinCodeChip code={joinCode} watching={teacherWatching} />}
+
+      {/* --- PWA/Voice/AAC branch additions --- */}
+      {/* Listening indicator: visible cue + SR announcement of interim text. */}
+      {voiceEnabled && speech.supported && speech.listening && (
+        <div
+          className="absolute bottom-4 left-4 inline-flex items-center gap-2 rounded-full bg-sage-50 border border-sage-200 px-3 py-1.5 text-sage-600 text-xs"
+          role="status"
+        >
+          <Mic size={14} className={reduceMotion ? undefined : "animate-pulse"} />
+          <span>Listening{speech.transcript ? `: "${speech.transcript}"` : "…"}</span>
+        </div>
+      )}
+
+      {/* AAC board toggle — only while a session is active. */}
+      {aacEnabled && (phase.kind === "trial" || phase.kind === "break") && (
+        <button
+          onClick={() => setAacOpen(true)}
+          aria-label="Open communication board"
+          className="absolute bottom-4 right-4 inline-flex items-center gap-2 rounded-full bg-white border border-line shadow-tile px-4 py-2 text-sm text-ink hover:bg-sage-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-sage-500"
+        >
+          <MessageSquare size={16} className="text-sage-600" />
+          Talk
+        </button>
+      )}
+
+      {aacEnabled && (
+        <AACBoard
+          open={aacOpen}
+          onClose={() => setAacOpen(false)}
+          onBreak={goToBreak}
+          onAgain={rereadPrompt}
+          onDone={() => setAacOpen(false)}
+          volume={audioVolume}
+        />
+      )}
+      {/* --- end additions --- */}
+    </div>
+  );
+}
+
+// realtime co-presence: unobtrusive code shown when a room is live.
+function JoinCodeChip({ code, watching }: { code: string; watching: boolean }) {
+  return (
+    <div className="absolute top-4 right-4 select-none flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/90 border border-line text-xs text-muted">
+      <span
+        className={
+          "inline-block w-1.5 h-1.5 rounded-full " +
+          (watching ? "bg-sage" : "bg-line")
+        }
+        aria-hidden
+      />
+      <span>{watching ? "Teacher watching" : "Monitor code"}</span>
+      <span className="font-mono tracking-widest text-ink">{code}</span>
     </div>
   );
 }
@@ -437,6 +753,7 @@ function TrialView({
   ariaLabel,
   promptRef,
   choiceContainerRef,
+  scanIndex,
 }: {
   trial: PresentedTrial;
   onChoose: (id: string) => void;
@@ -445,6 +762,7 @@ function TrialView({
   ariaLabel: (id: string) => string;
   promptRef: React.MutableRefObject<HTMLParagraphElement | null>;
   choiceContainerRef: React.MutableRefObject<HTMLDivElement | null>;
+  scanIndex: number;
 }) {
   const items: ChoiceItem[] = trial.choiceIds.map((id) => ({
     id,
@@ -455,6 +773,9 @@ function TrialView({
     <div className="w-full max-w-5xl">
       <p
         ref={promptRef}
+        // a11y: announce the prompt to assistive tech as it changes.
+        role="status"
+        aria-live="polite"
         className="text-center text-2xl md:text-3xl text-ink mb-10 font-medium"
       >
         {trial.prompt}
@@ -467,6 +788,7 @@ function TrialView({
           errorlessHighlight={trial.errorlessHighlight}
           locked={locked}
           onChoose={onChoose}
+          scanIndex={scanIndex}
         />
       </div>
     </div>

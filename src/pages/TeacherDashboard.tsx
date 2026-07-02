@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, Settings as SettingsIcon, ChevronLeft } from "lucide-react";
+import { Plus, Settings as SettingsIcon, ChevronLeft, MonitorPlay } from "lucide-react";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { studentRepo } from "@/db/studentRepo";
@@ -9,11 +9,13 @@ import { StudentDetail } from "./StudentDetail";
 
 interface Props {
   onOpenSettings: () => void;
+  /** realtime co-presence: open the live monitor view. */
+  onOpenMonitor: () => void;
   onStartSession: (student: StudentProfile, domain: DomainId) => void;
   refreshKey: number;
 }
 
-export function TeacherDashboard({ onOpenSettings, onStartSession, refreshKey }: Props) {
+export function TeacherDashboard({ onOpenSettings, onOpenMonitor, onStartSession, refreshKey }: Props) {
   const [students, setStudents] = useState<StudentProfile[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -54,6 +56,10 @@ export function TeacherDashboard({ onOpenSettings, onStartSession, refreshKey }:
                 <Plus size={16} /> Add student
               </Button>
             )}
+            {/* realtime co-presence: enter the live monitor. */}
+            <Button size="sm" variant="ghost" onClick={onOpenMonitor} aria-label="Live monitor">
+              <MonitorPlay size={18} />
+            </Button>
             <Button size="sm" variant="ghost" onClick={onOpenSettings} aria-label="Settings">
               <SettingsIcon size={18} />
             </Button>

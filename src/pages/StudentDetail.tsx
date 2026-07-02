@@ -7,13 +7,32 @@ import {
   StudentProfile,
 } from "@/engine/types";
 import { sessionRepo } from "@/db/sessionRepo";
-import { Sparkles, ChevronRight, Eye, Play } from "lucide-react";
+import {
+  buildProgressCsv,
+  downloadCsv,
+  progressCsvFilename,
+} from "@/lib/csvExport";
+import { printProgressReport } from "@/lib/pdfExport";
+import {
+  Sparkles,
+  ChevronRight,
+  Eye,
+  Play,
+  Download,
+  FileText,
+  MessageSquare,
+} from "lucide-react";
 
-// Lazy chunks: Recharts (~210KB raw) and the SessionReplay modal both
-// load only when their UI is reached. See BUNDLE.md.
+// Lazy chunks: Recharts (~210KB raw), the SessionReplay modal, and the
+// Co-pilot drawer all load only when their UI is reached. Keeping the
+// co-pilot lazy keeps the streaming/prompt/zod code out of this view's
+// initial chunk. See BUNDLE.md.
 const DomainTrendChart = lazy(() => import("./DomainTrendChart"));
 const SessionReplay = lazy(() =>
   import("./SessionReplay").then((m) => ({ default: m.SessionReplay })),
+);
+const Copilot = lazy(() =>
+  import("./Copilot").then((m) => ({ default: m.Copilot })),
 );
 
 interface Props {
@@ -24,6 +43,8 @@ interface Props {
 export function StudentDetail({ student, onStartSession }: Props) {
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [replaying, setReplaying] = useState<SessionRecord | null>(null);
+  // Co-pilot entry point: opens the streaming Q&A / IEP-draft drawer.
+  const [copilotOpen, setCopilotOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,6 +83,15 @@ export function StudentDetail({ student, onStartSession }: Props) {
             <div className="mt-2 text-sm text-ink/80 italic">{student.note}</div>
           )}
         </div>
+        {/* Co-pilot entry point — opens the lazy-loaded streaming drawer. */}
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => setCopilotOpen(true)}
+          title="Ask the AI co-pilot about this student"
+        >
+          <MessageSquare size={16} /> Co-pilot
+        </Button>
       </div>
 
       <div className="grid lg:grid-cols-2 gap-6">
@@ -76,7 +106,32 @@ export function StudentDetail({ student, onStartSession }: Props) {
       </div>
 
       <div>
-        <h3 className="text-lg font-semibold text-ink mb-2">Recent sessions</h3>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-lg font-semibold text-ink">Recent sessions</h3>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={sessions.length === 0}
+              title="Open a printable progress report to save as PDF"
+              onClick={() => printProgressReport(student, sessions)}
+            >
+              <FileText size={14} /> Export PDF
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={sessions.length === 0}
+              title="Download last quarter's accuracy and adaptation events as CSV"
+              onClick={() => {
+                const csv = buildProgressCsv(student, sessions);
+                downloadCsv(progressCsvFilename(student), csv);
+              }}
+            >
+              <Download size={14} /> Export CSV
+            </Button>
+          </div>
+        </div>
         <ul className="divide-y divide-line bg-white border border-line rounded-tile">
           {sessions.slice(0, 12).map((s) => (
             <li key={s.id} className="px-4 py-3 flex flex-wrap items-center gap-3">
@@ -131,6 +186,12 @@ export function StudentDetail({ student, onStartSession }: Props) {
       {replaying && (
         <Suspense fallback={null}>
           <SessionReplay session={replaying} onClose={() => setReplaying(null)} />
+        </Suspense>
+      )}
+
+      {copilotOpen && (
+        <Suspense fallback={null}>
+          <Copilot student={student} onClose={() => setCopilotOpen(false)} />
         </Suspense>
       )}
     </div>

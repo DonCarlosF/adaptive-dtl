@@ -50,17 +50,48 @@ Opens on `http://localhost:5173/` with the three seed students and several weeks
 
 **Optional:** paste an Anthropic API key in Settings to enable live AI activity generation. The key never leaves your browser except in the direct call to Anthropic's Messages API, which uses the `anthropic-dangerous-direct-browser-access` header (intentional for a single-user demo; not what you'd ship in a multi-tenant product).
 
+### Cloud mode (optional backend)
+
+The app runs fully local by default. For a multi-teacher deployment, the
+[`server/`](./server) backend adds accounts, per-teacher data sync, and a
+server-side Anthropic proxy so the API key never reaches the browser.
+
+```bash
+# terminal 1 — backend
+cd server && npm install && cp .env.example .env   # set JWT_SECRET
+npm run dev                                         # :8787
+
+# terminal 2 — frontend pointed at the backend
+VITE_API_URL=http://localhost:8787 npm run dev
+```
+
+With `VITE_API_URL` set, the app requires login and routes data + AI
+through the backend. With it unset, behavior is exactly as documented
+above (IndexedDB + browser-key AI). See [`server/README.md`](./server/README.md)
+for the API and security notes.
+
+### Tests
+
+```bash
+npm test            # frontend: engine rules, gaze rules, exports, hooks, components
+cd server && npm test   # backend: auth, per-user data scoping, AI proxy
+```
+
 ## What the app does
 
-- **Teacher Dashboard.** Add students, set their reading level and goals and response method, see trend lines per goal area, scrub through past sessions in the replay view.
-- **Student Session.** Fullscreen, locked to a 3-second hold-to-exit. Audio prompt, 2–4 large choice tiles, soft chime + thumbs-up on correct, errorless re-prompt on wrong, breathing-dot break when the adaptive engine suggests one, calm completion screen at the end.
+- **Teacher Dashboard.** Add students, set their reading level and goals and response method, see trend lines per goal area, scrub through past sessions in the replay view, and export a quarter's progress as CSV or printable PDF.
+- **Student Session.** Fullscreen, locked to a 3-second hold-to-exit. Audio prompt, 2–4 large choice tiles, soft chime + thumbs-up on correct, errorless re-prompt on wrong, breathing-dot break when the adaptive engine suggests one, calm completion screen at the end. Touch or single-switch scanning input.
 - **Three skill domains.** Sight Words (Dolch list, leveled PreK–2nd, with optional AI-introduced words rendered through the same tile component). Money ID (penny → $5 bill, labeled inline SVGs). Community Signs (stop, exit, restroom, walk / don't walk, danger).
 - **Adaptive engine.** Four response-based rules and three gaze-based rules that compose: choice count goes up after 3-in-a-row correct, drops to 2 with errorless on after 2-in-a-row wrong, suggests a break when response time spikes, ends the session early below 50% at trial 8. Gaze rules add an off-screen-for-5-seconds break trigger, a look-before-answer score, and an attention-pacing flag.
+- **On-device ML adaptation.** A pure-TypeScript layer (no TF.js, no heavy deps) on top of the rules: an attention/engagement score derived from gaze features, and an online logistic-regression difficulty model that trains across a student's sessions and advises difficulty changes. Strictly advisory and safe-only — it can ease or hold, never override a safety drop or early-end. Persisted per `(student, domain)`.
+- **Live AI tutor.** Streaming Claude responses (SSE, client + server) power a teacher co-pilot drawer: ask natural-language questions grounded in a student's session history, and one-click draft a Zod-validated IEP progress note. Streams token-by-token; lazy-loaded so it never bloats the dashboard chunk.
+- **Real-time co-presence.** A teacher watches a live student session from another device over a WebSocket relay — mirrored progress, accuracy, and gaze, plus remote controls (take a break / make it easier / end). Authenticated, per-account room scoping, PII-free snapshots. No-ops cleanly when the cloud backend isn't configured.
+- **Installable PWA + voice + AAC.** Offline-first installable app (Workbox service worker), spoken-answer input via the Web Speech API, an AAC core-vocabulary board with text-to-speech, and a WCAG-AAA pass (reduced-motion gating, keyboard focus rings, aria-live prompts).
 - **AI activity generation.** A bring-your-own-key flow that asks Claude Sonnet for trial sets tailored to a student's reading level, profile note, and recent per-item performance. Responses are validated with Zod before any caching or session use; cached by `(student, domain, contentHash)`; falls back to hand-authored content on any error with a clear toast.
-- **Simulated eye tracking.** A 10Hz synthetic gaze stream with realistic drift, saccades, and occasional off-screen excursions. Real downstream rules consume it, the breathing-dot break fires from it, gaze traces are recorded into session records, the indicator overlay shows it on screen during teacher demos.
+- **Eye tracking.** Real webcam tracking via WebGazer.js (opt-in per the camera toggle in Settings), or a 10Hz synthetic gaze stream with realistic drift, saccades, and off-screen excursions. The synthetic stream is also the automatic fallback when a camera is unavailable or denied. Either source feeds the same rules: the breathing-dot break fires from it, gaze traces are recorded into session records, and the indicator overlay can show it during teacher demos (badged "Simulated" when it isn't the camera).
 - **Session replay.** Scrub a completed session, see every trial, every adaptation event, and the recorded gaze trace overlaid per trial.
 - **Settings.** Eye tracking and gaze indicator toggles, 5-point calibration UI (real flow, mock training behind it), per-domain AI generation buttons, the architecture panel with the data-flow diagram, high-contrast mode, OpenDyslexic font for sight words, audio volume.
-- **Privacy.** No backend, no auth, no analytics. The only outbound network call is the AI generation call to Anthropic, and only when you click Generate.
+- **Privacy.** Local by default: no backend, no auth, no analytics, and the only outbound call is AI generation to Anthropic when you click Generate. Optional cloud mode (`server/`) adds accounts and per-teacher sync when a deployment needs it, and moves the Anthropic key server-side.
 
 ## Design rationale
 
@@ -109,7 +140,7 @@ src/
     gazeRules.ts        gaze-rule implementations (off-screen, look-before, pacing)
     sessionLogger.ts    state → SessionRecord
   eyetracking/
-    webgazerWrapper.ts  stub for real WebGazer integration
+    webgazerWrapper.ts  real WebGazer integration (on-demand, camera fallback)
     syntheticGaze.ts    10Hz simulator (drift / saccade / off-screen)
     gazeStore.ts        zustand store, drives the simulator
     calibration.tsx     5-point UI with demo notice
@@ -120,27 +151,41 @@ src/
     promptTemplates.ts    SYSTEM_PROMPT + per-domain user prompt builder
     zodSchemas.ts         response validation
     contentHash.ts        cache-key hashing
+    sseParser.ts          incremental SSE parser for streaming
+    anthropicStream.ts    streaming Messages call (onToken)
+    copilotContext.ts     session-history → grounded co-pilot context
+    copilotPrompts.ts     co-pilot + Zod-validated IEP-note prompts
+  ml/                  on-device ML (attention scorer, online difficulty model, features)
+  realtime/            co-presence: protocol, monitor reducer, WS hooks
+  voice/               Web Speech recognition hook + spoken-answer matcher
+  a11y/                usePrefersReducedMotion
   db/
-    schema.ts             Dexie v2 (students, sessions, settings, aiGenerated)
-    studentRepo.ts        ─┐
-    sessionRepo.ts         ├ thin per-table repos
+    schema.ts             Dexie v3 (students, sessions, settings, aiGenerated, mlModels)
+    studentRepo.ts        ─┐ thin per-table repos; delegate to the cloud
+    sessionRepo.ts         ├ backend when logged in, else IndexedDB
     settingsRepo.ts        │
-    aiGeneratedRepo.ts    ─┘
+    aiGeneratedRepo.ts     │
+    mlModelRepo.ts        ─┘
     seed.ts               3 seed students + fake session history
-  hooks/             useSpeak, useChime, useLongPress
+  api/               cloud client, auth, cloud-backed repos, AI + stream proxy clients
+  hooks/             useSpeak, useChime, useLongPress, useSwitchScanning
+  components/        …, AACBoard, ErrorBoundary
   pages/             TeacherDashboard, StudentDetail, AddStudentModal, StudentSession,
-                     SessionReplay, Settings, EyeTrackingArchitecture, DomainTrendChart
-  lib/               tokens.ts, cn.ts
+                     SessionReplay, Settings, Login, Copilot, TeacherMonitor,
+                     EyeTrackingArchitecture, DomainTrendChart
+  lib/               tokens.ts, cn.ts, progressReport.ts, csvExport.ts, pdfExport.ts
+  test/              Vitest setup
   App.tsx, main.tsx, index.css
+server/              optional cloud backend (Express + auth + Anthropic proxy/stream + WS relay)
 ```
 
 ## Roadmap
 
-- **Real webcam eye tracking** via WebGazer.js. The swap is small and labeled — `EYE_TRACKING.md` lists the three files that change.
+- **Eye-tracking accuracy tuning** for hard conditions (low light, glasses, off-axis heads) and a teacher-facing camera-positioning aid. Real WebGazer tracking ships today with automatic fallback to the simulated stream — see `EYE_TRACKING.md`.
 - **VR/AR plugin support.** Extend the domain interface so a Meta-Quest-rendered "walk to the corner store and buy a quarter's worth of milk" scenario can plug into the same engine. Floreo has shown what immersive functional skill instruction can look like in this population; this would be a complementary classroom tool.
-- **Switch input.** The response method is already a profile field; the rollout routes it to real switch event handling.
-- **AAC core-board overlay.** For students whose primary expressive system is symbol-based, surface a core board alongside the choice array.
-- **IEP progress export.** One-click PDF / CSV of last quarter's accuracy and adaptation events, formatted for an IEP progress report row.
+- **Switch input.** Single-switch scanning ships today — choices are scanned on a configurable dwell and selected with Space/Enter, a mapped switch, or an on-screen Select button. Enabled automatically for "eye gaze" profiles or via Settings → Input & access. Next: multi-switch and step-scanning modes.
+- **AAC core-board overlay.** Ships today — a core-vocabulary board with text-to-speech is available in-session (Settings → Input & access). Next: per-student boards and fringe vocabulary.
+- **IEP progress export.** One-click CSV and printable PDF of last quarter's accuracy and adaptation events both ship today (Export CSV / Export PDF on the student page). The AI co-pilot can also draft a structured progress note from the data.
 - **District pilot.** Real classroom deployment in a single Mod SDC classroom for one quarter, with paraprofessional training and weekly data reviews.
 
 ---

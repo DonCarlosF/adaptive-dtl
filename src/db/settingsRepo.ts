@@ -3,7 +3,9 @@ import { AppSettings, DEFAULT_SETTINGS, db } from "./schema";
 export const settingsRepo = {
   async get(): Promise<AppSettings> {
     const row = await db.settings.get("app");
-    return row ?? DEFAULT_SETTINGS;
+    // Merge over defaults so rows written before a field was added still
+    // resolve to a complete settings object.
+    return { ...DEFAULT_SETTINGS, ...row, id: "app" };
   },
 
   async patch(patch: Partial<Omit<AppSettings, "id">>): Promise<AppSettings> {

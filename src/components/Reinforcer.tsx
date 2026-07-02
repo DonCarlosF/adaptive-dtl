@@ -1,4 +1,6 @@
 import { ThumbsUp } from "lucide-react";
+import { cn } from "@/lib/cn";
+import { usePrefersReducedMotion } from "@/a11y/usePrefersReducedMotion";
 
 interface Props {
   show: boolean;
@@ -13,10 +15,16 @@ interface Props {
  * which can be overwhelming for some students.
  */
 export function Reinforcer({ show, lowStim = false }: Props) {
+  const reduceMotion = usePrefersReducedMotion();
   if (!show) return null;
   return (
     <div
-      className="pointer-events-none fixed inset-0 z-40 flex items-center justify-center animate-fadeInOut"
+      // a11y: skip the fade animation under prefers-reduced-motion; the
+      // brief wash still appears, just without the scale/opacity transition.
+      className={cn(
+        "pointer-events-none fixed inset-0 z-40 flex items-center justify-center",
+        !reduceMotion && "animate-fadeInOut",
+      )}
       aria-hidden
     >
       <div

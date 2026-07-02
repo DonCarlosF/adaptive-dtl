@@ -18,6 +18,11 @@ interface Props {
   /** Disable interaction (during reinforcer) */
   locked: boolean;
   onChoose: (id: string) => void;
+  /**
+   * Index of the tile currently highlighted by single-switch scanning, or
+   * -1 when scanning is inactive. The highlighted tile gets a focus ring.
+   */
+  scanIndex?: number;
 }
 
 /**
@@ -31,6 +36,7 @@ export function ChoiceGrid({
   errorlessHighlight,
   locked,
   onChoose,
+  scanIndex = -1,
 }: Props) {
   const cols = choices.length <= 2 ? 2 : choices.length === 3 ? 3 : 4;
 
@@ -43,9 +49,10 @@ export function ChoiceGrid({
         maxWidth: cols * 220,
       }}
     >
-      {choices.map((c) => {
+      {choices.map((c, i) => {
         const isCorrect = c.id === correctId;
         const isSelected = c.id === selectedId;
+        const isScanning = i === scanIndex;
         const incorrectAfterTap =
           errorlessHighlight && !isCorrect && selectedId != null;
 
@@ -56,6 +63,7 @@ export function ChoiceGrid({
             disabled={locked}
             onClick={() => onChoose(c.id)}
             aria-label={c.ariaLabel}
+            aria-current={isScanning ? "true" : undefined}
             className={cn(
               "group relative flex items-center justify-center min-h-[140px] min-w-[120px]",
               "bg-white rounded-tile border-2 transition-all duration-300 ease-out",
@@ -67,6 +75,10 @@ export function ChoiceGrid({
                 : "border-line",
               incorrectAfterTap && "opacity-20",
               isSelected && !errorlessHighlight && "border-sage",
+              // Switch-scanning highlight: a clear, calm ring on the dwell
+              // target. Sky tone so it reads differently from the sage
+              // correct/errorless cues.
+              isScanning && "border-sky-400 ring-4 ring-sky-200 -translate-y-0.5 shadow-card",
             )}
           >
             <div className="w-full h-full flex items-center justify-center">

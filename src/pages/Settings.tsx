@@ -6,6 +6,7 @@ import {
   Sparkles,
   Loader2,
   Check,
+  Accessibility,
 } from "lucide-react";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
@@ -18,9 +19,13 @@ import { DomainId, DOMAIN_LABELS, StudentProfile } from "@/engine/types";
 import { requestAIGeneration } from "@/ai/activityGenerator";
 import { describeError } from "@/ai/anthropicErrors";
 import { EyeTrackingArchitecturePanel } from "./EyeTrackingArchitecture";
+import { isCloudEnabled } from "@/api/client";
+import { logout } from "@/api/auth";
+import { LogOut } from "lucide-react";
 
 interface Props {
   onBack: () => void;
+  onLogout?: () => void;
 }
 
 const DOMAINS: DomainId[] = ["sightWords", "moneyId", "communitySigns"];
@@ -31,7 +36,7 @@ type GenStatus =
   | { kind: "ok"; cached: boolean; count: number; at: number }
   | { kind: "error"; message: string };
 
-export function Settings({ onBack }: Props) {
+export function Settings({ onBack, onLogout }: Props) {
   const [s, setS] = useState<AppSettings | null>(null);
   const [students, setStudents] = useState<StudentProfile[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState<string>("");
@@ -63,7 +68,7 @@ export function Settings({ onBack }: Props) {
       setToast("Add or select a student first.");
       return;
     }
-    if (!s.apiKey.trim()) {
+    if (!isCloudEnabled() && !s.apiKey.trim()) {
       setToast("Add an Anthropic API key in this panel first.");
       return;
     }
@@ -111,15 +116,40 @@ export function Settings({ onBack }: Props) {
       </header>
 
       <main className="max-w-3xl mx-auto px-6 py-8 space-y-6">
+        {isCloudEnabled() && onLogout && (
+          <Card className="p-6">
+            <SectionHeader
+              icon={<LogOut size={18} />}
+              title="Account"
+              subtitle="You're signed in to the cloud backend. Students and sessions sync to your account."
+            />
+            <Row
+              label="Sign out"
+              control={
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    logout();
+                    onLogout();
+                  }}
+                >
+                  Sign out
+                </Button>
+              }
+            />
+          </Card>
+        )}
+
         <Card className="p-6">
           <SectionHeader
             icon={<Eye size={18} />}
             title="Eye tracking"
-            subtitle="When enabled, the app emits a simulated gaze stream so the gaze rules and overlay run end-to-end. Real camera integration is the next milestone."
+            subtitle="Drive the gaze rules and overlay from real webcam tracking (WebGazer) or a built-in simulated stream. The simulator is the fallback whenever a camera isn't available."
           />
           <Row
             label="Enable eye tracking"
-            help="Starts the simulated gaze stream at ~10Hz."
+            help="Starts a gaze stream at ~10Hz for the session."
             control={
               <Toggle
                 checked={s.eyeTrackingEnabled}
@@ -128,8 +158,18 @@ export function Settings({ onBack }: Props) {
             }
           />
           <Row
+            label="Use camera (real tracking)"
+            help="Uses the webcam via WebGazer. Falls back to the simulated stream if the camera is blocked or unavailable. Calibrate after turning this on."
+            control={
+              <Toggle
+                checked={s.cameraTracking}
+                onChange={(v) => update({ cameraTracking: v })}
+              />
+            }
+          />
+          <Row
             label="Show gaze indicator during sessions"
-            help="Teacher demo only — shows a dot tracking the simulated gaze. Off for student-facing use."
+            help="Teacher demo only — shows a dot tracking the gaze. Off for student-facing use."
             control={
               <Toggle
                 checked={s.gazeIndicatorEnabled}
@@ -162,19 +202,27 @@ export function Settings({ onBack }: Props) {
             title="AI-generated activities"
             subtitle="Generate fresh trials tailored to a student's reading level and recent performance. Cached locally — identical prompts won't re-fire the API."
           />
-          <Row
-            label="Anthropic API key"
-            control={
-              <input
-                type="password"
-                value={s.apiKey}
-                onChange={(e) => update({ apiKey: e.target.value })}
-                placeholder="sk-ant-..."
-                className="w-72 max-w-full rounded-xl border border-line bg-white px-3 py-2 text-sm focus:outline-none focus:border-sage"
-              />
-            }
-            help="Stored only on this device."
-          />
+          {isCloudEnabled() ? (
+            <Row
+              label="Anthropic API key"
+              control={<span className="text-sm text-muted">Managed by the server</span>}
+              help="In cloud mode the key lives on the backend and never reaches the browser."
+            />
+          ) : (
+            <Row
+              label="Anthropic API key"
+              control={
+                <input
+                  type="password"
+                  value={s.apiKey}
+                  onChange={(e) => update({ apiKey: e.target.value })}
+                  placeholder="sk-ant-..."
+                  className="w-72 max-w-full rounded-xl border border-line bg-white px-3 py-2 text-sm focus:outline-none focus:border-sage"
+                />
+              }
+              help="Stored only on this device."
+            />
+          )}
           <Row
             label="Generate for"
             control={
@@ -211,6 +259,41 @@ export function Settings({ onBack }: Props) {
 
         <Card className="p-6">
           <SectionHeader
+            icon={<Accessibility size={18} />}
+            title="Input & access"
+            subtitle="Alternative input for students who can't reliably touch a target. Profiles set to 'eye gaze' use scanning automatically."
+          />
+          <Row
+            label="Single-switch scanning"
+            help="Highlights choices one at a time. Press Space/Enter, a mapped switch, or the on-screen Select button to choose the highlighted tile."
+            control={
+              <Toggle
+                checked={s.switchScanning}
+                onChange={(v) => update({ switchScanning: v })}
+              />
+            }
+          />
+          <Row
+            label={`Scan dwell: ${(s.switchScanIntervalMs / 1000).toFixed(1)}s per item`}
+            help="How long each choice stays highlighted before the scan advances."
+            control={
+              <input
+                type="range"
+                min={500}
+                max={4000}
+                step={250}
+                value={s.switchScanIntervalMs}
+                onChange={(e) =>
+                  update({ switchScanIntervalMs: Number(e.target.value) })
+                }
+                className="w-48 accent-sage-500"
+              />
+            }
+          />
+        </Card>
+
+        <Card className="p-6">
+          <SectionHeader
             icon={<KeyRound size={18} />}
             title="Display & audio"
             subtitle="Defaults that apply across student sessions."
@@ -230,6 +313,27 @@ export function Settings({ onBack }: Props) {
               <Toggle
                 checked={s.dyslexicFont}
                 onChange={(v) => update({ dyslexicFont: v })}
+              />
+            }
+          />
+          {/* --- PWA/Voice/AAC branch additions: alternative input methods --- */}
+          <Row
+            label="Voice input (spoken answers)"
+            help="When supported, the learner can say a choice out loud during a trial. Requires microphone permission; degrades to a no-op where unavailable."
+            control={
+              <Toggle
+                checked={s.voiceInput}
+                onChange={(v) => update({ voiceInput: v })}
+              />
+            }
+          />
+          <Row
+            label="AAC communication board"
+            help="Adds a tap-to-talk button in sessions with core words (yes, no, more, stop, help, break, again, done) that speak aloud."
+            control={
+              <Toggle
+                checked={s.aacBoard}
+                onChange={(v) => update({ aacBoard: v })}
               />
             }
           />
@@ -261,7 +365,12 @@ export function Settings({ onBack }: Props) {
         </Card>
       </main>
 
-      {showCal && <CalibrationOverlay onClose={() => setShowCal(false)} />}
+      {showCal && (
+        <CalibrationOverlay
+          onClose={() => setShowCal(false)}
+          cameraTracking={s.cameraTracking}
+        />
+      )}
 
       <Toast
         show={toast !== null}

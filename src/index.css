@@ -12,12 +12,31 @@
     font-feature-settings: "rlig" 1, "calt" 1;
     -webkit-font-smoothing: antialiased;
   }
-  /* Quiet focus rings — visible but not jarring. */
-  :focus {
+  /* Quiet focus rings — suppress the default outline only for pointer
+     interactions, but keep a strong, always-visible ring for keyboard
+     users (WCAG 2.4.7 Focus Visible, AAA 2.4.13 Focus Appearance). */
+  :focus:not(:focus-visible) {
     outline: none;
+  }
+  :focus-visible {
+    outline: 3px solid #446a60; /* sage-600 — high contrast on canvas */
+    outline-offset: 2px;
+    border-radius: 4px;
   }
   /* Disable iOS tap highlight inside the student session. */
   button {
     -webkit-tap-highlight-color: transparent;
+  }
+  /* Global motion opt-out backstop: even where a component forgets to gate
+     an animation, honor the user's reduced-motion preference. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }

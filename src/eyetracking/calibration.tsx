@@ -1,8 +1,11 @@
-// PASS 2: Wire each dot tap to actually feed WebGazer's training set.
+// Calibration overlay.
 //
-// Pass-1 calibration UI. Sequence: 5 dots in a corners-and-center pattern,
-// audio narration ("Look at the dot…"), tap to advance. The UI here is
-// the real one we want to ship — only the gaze training is mocked.
+// Sequence: 5 dots in a corners-and-center pattern, audio narration, tap
+// each dot while looking at it. Under real (camera) tracking each tap
+// feeds WebGazer a training sample anchored to the dot's screen position
+// (a few samples per point — the minimum that meaningfully improves the
+// ridge regression). Under the simulated source the same UI runs without
+// a camera so the flow can be demoed anywhere.
 
 import { useEffect, useState } from "react";
 import { useSpeak } from "@/hooks/useSpeak";
@@ -17,23 +20,47 @@ const POINTS: Array<{ x: string; y: string }> = [
   { x: "90%", y: "90%" },
 ];
 
+/** Samples fed to WebGazer per calibration point. */
+const SAMPLES_PER_POINT = 5;
+
 interface Props {
   onClose: () => void;
+  /** Prefer the real webcam source for this calibration session. */
+  cameraTracking?: boolean;
 }
 
-export function CalibrationOverlay({ onClose }: Props) {
+export function CalibrationOverlay({ onClose, cameraTracking = false }: Props) {
   const [step, setStep] = useState(0);
   const { speak, cancel } = useSpeak();
-  const { startCalibration, advanceCalibration, finishCalibration } =
+  const { startCalibration, advanceCalibration, finishCalibration, enable } =
     useGazeStore();
+  const mode = useGazeStore((s) => s.mode);
 
   useEffect(() => {
     startCalibration();
+    // Ensure a gaze source is running so taps can train the model. Left
+    // running on close so the calibrated model carries into the session.
+    if (useGazeStore.getState().mode === "off") {
+      void enable(cameraTracking);
+    }
     speak("Look at the dot, then tap it. We will do this five times.");
     return () => cancel();
-  }, [speak, cancel, startCalibration]);
+  }, [speak, cancel, startCalibration, enable, cameraTracking]);
 
-  const handleTap = () => {
+  const recordReal = (el: HTMLElement) => {
+    if (useGazeStore.getState().mode !== "real") return;
+    const r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    void import("./webgazerWrapper").then((m) => {
+      for (let i = 0; i < SAMPLES_PER_POINT; i++) {
+        m.recordCalibrationPoint(cx, cy);
+      }
+    });
+  };
+
+  const handleTap = (e: React.MouseEvent<HTMLButtonElement>) => {
+    recordReal(e.currentTarget);
     const next = step + 1;
     advanceCalibration(next, POINTS.length);
     if (next >= POINTS.length) {
@@ -54,8 +81,9 @@ export function CalibrationOverlay({ onClose }: Props) {
         Calibration {step + 1} / {POINTS.length}
       </div>
       <div className="absolute top-6 left-1/2 -translate-x-1/2 text-xs text-muted bg-white/80 border border-line rounded-full px-3 py-1.5 max-w-md text-center">
-        Demo calibration — real WebGazer.js integration is the next milestone.
-        See <code className="text-ink">EYE_TRACKING.md</code> for the architecture.
+        {mode === "real"
+          ? "Camera calibration — look directly at each dot before tapping."
+          : "Simulated calibration — enable camera tracking in Settings to train the real model."}
       </div>
       <button
         onClick={handleTap}

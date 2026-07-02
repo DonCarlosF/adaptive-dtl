@@ -1,17 +1,30 @@
-// SIMULATED — see EYE_TRACKING.md
+// Gaze store — owns the active gaze source and republishes samples.
 //
-// Pass 2: the store no longer holds null forever. When eye tracking is
-// "enabled" in settings, the store starts a `SyntheticGaze` instance and
-// republishes samples through zustand. Components that previously had
-// no signal now receive ~10Hz updates that look believable enough for
-// the gaze rules and the indicator overlay to do real work.
+// Two sources share one downstream pipeline (gaze rules, recording,
+// indicator overlay):
+//
+//   - "real"      — WebGazer.js predictions from the webcam (see
+//                   webgazerWrapper.ts), used when the teacher opts into
+//                   camera tracking and the camera/library are available.
+//   - "simulated" — the ~10Hz SyntheticGaze stream, used when camera
+//                   tracking is off, unavailable, or denied. Kept on
+//                   purpose for tests and no-camera demos (EYE_TRACKING.md).
+//
+// `enable(preferCamera)` tries the requested source and transparently
+// falls back to simulated, recording why in `trackingError`.
 
 import { create } from "zustand";
 import { GazeSample } from "@/engine/gazeRules";
 import { SyntheticGaze } from "./syntheticGaze";
 
+export type GazeMode = "off" | "simulated" | "real";
+
 interface GazeState {
+  mode: GazeMode;
+  /** Convenience: true whenever a source is running. */
   enabled: boolean;
+  /** Set when a requested camera source fell back to simulated. */
+  trackingError: string | null;
   calibrating: boolean;
   /** 0..1 calibration progress; 1 = fully calibrated. */
   calibrationProgress: number;
@@ -22,7 +35,10 @@ interface GazeState {
   /** Recording buffer for the active session — capped to MAX_BUFFER. */
   buffer: GazeSample[];
 
-  setEnabled: (enabled: boolean) => void;
+  /** Start a gaze source. Returns the mode actually started. */
+  enable: (preferCamera: boolean) => Promise<GazeMode>;
+  /** Stop the active source and release the camera if one was in use. */
+  disable: () => void;
   startCalibration: () => void;
   advanceCalibration: (step: number, totalSteps: number) => void;
   finishCalibration: () => void;
@@ -32,19 +48,55 @@ interface GazeState {
 
 const MAX_BUFFER = 1500; // ~150s at 10Hz
 
-export const useGazeStore = create<GazeState>((set) => ({
+export const useGazeStore = create<GazeState>((set, get) => ({
+  mode: "off",
   enabled: false,
+  trackingError: null,
   calibrating: false,
   calibrationProgress: 0,
   latest: null,
   lastOnScreenAt: null,
   buffer: [],
 
-  setEnabled: (enabled) => {
-    set({ enabled, latest: enabled ? null : null });
-    if (enabled) startSimulator();
-    else stopSimulator();
+  enable: async (preferCamera) => {
+    if (get().mode !== "off") return get().mode;
+
+    if (preferCamera) {
+      const { initGazeTracking } = await import("./webgazerWrapper");
+      const res = await initGazeTracking({
+        onSample: (s) => get().pushSample(s),
+      });
+      if (res.ok) {
+        set({ mode: "real", enabled: true, trackingError: null });
+        return "real";
+      }
+      // Fall back to the simulator, but tell the teacher why.
+      startSimulator();
+      set({
+        mode: "simulated",
+        enabled: true,
+        trackingError:
+          (res.reason ?? "Camera unavailable.") + " Using simulated gaze.",
+      });
+      return "simulated";
+    }
+
+    startSimulator();
+    set({ mode: "simulated", enabled: true, trackingError: null });
+    return "simulated";
   },
+
+  disable: () => {
+    const mode = get().mode;
+    if (mode === "real") {
+      void import("./webgazerWrapper").then((m) => m.shutdown());
+    } else if (mode === "simulated") {
+      stopSimulator();
+    }
+    set({ mode: "off", enabled: false, latest: null });
+    get().resetBuffer();
+  },
+
   startCalibration: () => set({ calibrating: true, calibrationProgress: 0 }),
   advanceCalibration: (step, totalSteps) =>
     set({ calibrationProgress: Math.min(1, step / totalSteps) }),
@@ -52,7 +104,8 @@ export const useGazeStore = create<GazeState>((set) => ({
   pushSample: (sample) =>
     set((s) => {
       const onScreen = isOnScreen(sample);
-      const buffer = s.buffer.length >= MAX_BUFFER ? s.buffer.slice(-MAX_BUFFER + 1) : s.buffer;
+      const buffer =
+        s.buffer.length >= MAX_BUFFER ? s.buffer.slice(-MAX_BUFFER + 1) : s.buffer;
       return {
         latest: sample,
         lastOnScreenAt: onScreen ? sample.timestamp : s.lastOnScreenAt,
@@ -94,7 +147,6 @@ function stopSimulator(): void {
   simulator = null;
   unsubscribe = null;
   window.removeEventListener("resize", handleResize);
-  useGazeStore.getState().resetBuffer();
 }
 
 function handleResize(): void {
@@ -107,7 +159,7 @@ function handleResize(): void {
 /**
  * Update the simulator's attractor rectangles — the prompt area and
  * choice tiles for the current trial. Called by the StudentSession on
- * each new trial.
+ * each new trial. A no-op under real tracking (no attractors to bias).
  */
 export function setGazeAttractors(rects: DOMRect[]): void {
   simulator?.updateConfig({ attractors: rects });
@@ -118,6 +170,7 @@ export function readGazeSnapshot() {
   const s = useGazeStore.getState();
   return {
     enabled: s.enabled,
+    mode: s.mode,
     latest: s.latest,
     lastOnScreenAt: s.lastOnScreenAt,
     buffer: s.buffer,
