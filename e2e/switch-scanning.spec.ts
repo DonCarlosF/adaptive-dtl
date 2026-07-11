@@ -32,7 +32,9 @@ test.describe("Single-switch scanning", () => {
     await setRangeValue(dwellRow.locator('input[type="range"]'), 4000);
     await expect(page.getByText("Scan dwell: 4.0s per item")).toBeVisible();
 
-    await page.getByRole("button", { name: "Back" }).click();
+    // exact: substring matching would also hit the Data card's
+    // "Export backup" button.
+    await page.getByRole("button", { name: "Back", exact: true }).click();
 
     // Start a session; scanning activates once the trial unlocks.
     await openStudent(page, "Marcus");

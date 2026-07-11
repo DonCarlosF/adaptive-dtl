@@ -32,9 +32,14 @@ test.describe("Teacher dashboard (local mode)", () => {
     // One domain panel per goal, each with its own Start button and a
     // "Last: …" summary from the seeded history.
     for (const domain of ["Sight Words", "Money ID"]) {
+      // Require the Start button so the mastery-heatmap card (which also
+      // carries the domain name as a heading) doesn't match.
       const panel = page
         .locator("div.rounded-tile")
-        .filter({ has: page.getByText(domain, { exact: true }) });
+        .filter({ has: page.getByText(domain, { exact: true }) })
+        .filter({
+          has: page.getByRole("button", { name: "Start", exact: true }),
+        });
       await expect(panel).toHaveCount(1);
       await expect(panel.getByRole("button", { name: "Start", exact: true })).toBeVisible();
       await expect(panel.getByText(/Last: \d+%/)).toBeVisible();
