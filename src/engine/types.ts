@@ -30,6 +30,13 @@ export interface StudentProfile {
   attentionBaselineMin: number;
   /** Free-text teacher note. */
   note?: string;
+  // --- access-inclusion ---
+  /**
+   * Personal AAC fringe vocabulary (favourite items/people). Rendered as
+   * extra "My words" tiles on the communication board; each speaks on tap.
+   */
+  aacWords?: string[];
+  // --- end access-inclusion ---
   createdAt: number;
 }
 

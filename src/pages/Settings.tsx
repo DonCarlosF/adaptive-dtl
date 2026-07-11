@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ChevronLeft,
   Eye,
@@ -7,6 +7,9 @@ import {
   Loader2,
   Check,
   Accessibility,
+  // --- access-inclusion ---
+  AlertTriangle,
+  // --- end access-inclusion ---
 } from "lucide-react";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
@@ -19,6 +22,13 @@ import { DomainId, DOMAIN_LABELS, StudentProfile } from "@/engine/types";
 import { requestAIGeneration } from "@/ai/activityGenerator";
 import { describeError } from "@/ai/anthropicErrors";
 import { EyeTrackingArchitecturePanel } from "./EyeTrackingArchitecture";
+// --- access-inclusion: camera-positioning aid + calibration freshness ---
+import { useGazeStore } from "@/eyetracking/gazeStore";
+import {
+  formatCalibrationAge,
+  isCalibrationStale,
+} from "@/eyetracking/calibrationFreshness";
+// --- end access-inclusion ---
 import { isCloudEnabled } from "@/api/client";
 import { logout } from "@/api/auth";
 import { LogOut } from "lucide-react";
@@ -60,6 +70,55 @@ export function Settings({ onBack, onLogout }: Props) {
     const next = await settingsRepo.patch(patch);
     setS(next);
   };
+
+  // --- access-inclusion: camera-positioning preview (transient by design —
+  // it's a teacher-only setup aid, so it is deliberately NOT persisted in
+  // AppSettings; it resets to off whenever Settings closes so a preview can
+  // never leak into a student session). Toggling it on starts the real gaze
+  // source if none is running so there is a live video to position with;
+  // if we started it, we release the camera again on unmount. ---
+  const [camPreview, setCamPreview] = useState(false);
+  const startedGazeForPreviewRef = useRef(false);
+  const setCameraPreview = (show: boolean) => {
+    setCamPreview(show);
+    if (show && useGazeStore.getState().mode === "off") {
+      startedGazeForPreviewRef.current = true;
+      void useGazeStore
+        .getState()
+        .enable(true)
+        .then(() =>
+          import("@/eyetracking/webgazerWrapper").then((m) =>
+            m.setDebugPreview(true),
+          ),
+        );
+      return;
+    }
+    void import("@/eyetracking/webgazerWrapper").then((m) =>
+      m.setDebugPreview(show),
+    );
+  };
+  useEffect(
+    () => () => {
+      // Leaving Settings: always hide the preview overlays; release the
+      // camera only if the preview toggle was what started it.
+      void import("@/eyetracking/webgazerWrapper").then((m) =>
+        m.setDebugPreview(false),
+      );
+      if (startedGazeForPreviewRef.current) useGazeStore.getState().disable();
+    },
+    [],
+  );
+  // If camera tracking is switched off while the preview is up, drop the
+  // preview too — it is only meaningful for the real webcam source.
+  const camTrackingOn = s?.cameraTracking ?? false;
+  useEffect(() => {
+    if (camTrackingOn) return;
+    setCamPreview(false);
+    void import("@/eyetracking/webgazerWrapper").then((m) =>
+      m.setDebugPreview(false),
+    );
+  }, [camTrackingOn]);
+  // --- end access-inclusion ---
 
   const generate = async (domain: DomainId) => {
     if (!s) return;
@@ -167,6 +226,19 @@ export function Settings({ onBack, onLogout }: Props) {
               />
             }
           />
+          {/* --- access-inclusion: camera-positioning aid (transient; not persisted) --- */}
+          <Row
+            label="Show camera preview (positioning aid)"
+            help="Teacher-only setup aid: shows the camera thumbnail and face-feedback box so you can centre the student's face before calibrating. Turns itself off when you leave Settings and never appears in student sessions. Requires camera tracking."
+            control={
+              <Toggle
+                checked={camPreview}
+                onChange={setCameraPreview}
+                disabled={!s.cameraTracking}
+              />
+            }
+          />
+          {/* --- end access-inclusion --- */}
           <Row
             label="Show gaze indicator during sessions"
             help="Teacher demo only — shows a dot tracking the gaze. Off for student-facing use."
@@ -191,6 +263,27 @@ export function Settings({ onBack, onLogout }: Props) {
             }
             help="A 5-point sequence. Tap each dot when prompted."
           />
+          {/* --- access-inclusion: calibration freshness (AppSettings.lastCalibrationAt,
+              stamped by the calibration overlay on completion) --- */}
+          <div className="pt-2 text-xs">
+            <span className="text-muted">
+              Last calibrated: {formatCalibrationAge(s.lastCalibrationAt)}
+            </span>
+            {s.cameraTracking && isCalibrationStale(s.lastCalibrationAt) && (
+              <div
+                role="note"
+                className="mt-2 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-700"
+              >
+                <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                <span>
+                  {s.lastCalibrationAt == null
+                    ? "Camera tracking is on but has never been calibrated. A quick 5-point calibration with the student seated as usual makes gaze data much more useful."
+                    : "It's been over a week since the last calibration. Accuracy drifts as seating and lighting change — consider re-calibrating."}
+                </span>
+              </div>
+            )}
+          </div>
+          {/* --- end access-inclusion --- */}
           <div className="pt-3">
             <EyeTrackingArchitecturePanel />
           </div>
@@ -273,6 +366,27 @@ export function Settings({ onBack, onLogout }: Props) {
               />
             }
           />
+          {/* --- access-inclusion: scanning mode (auto dwell vs manual two-switch) --- */}
+          <Row
+            label="Scanning mode"
+            help="Auto: the highlight advances on the dwell timer and one switch (Space/Enter or Select) chooses. Step: no timer — switch 1 (Space or the on-screen Next button) moves the highlight, switch 2 (Enter or Select) chooses it."
+            control={
+              <select
+                value={s.switchScanMode}
+                onChange={(e) =>
+                  update({
+                    switchScanMode: e.target
+                      .value as AppSettings["switchScanMode"],
+                  })
+                }
+                className="rounded-xl border border-line bg-white px-3 py-2 text-sm"
+              >
+                <option value="auto">Auto (timed)</option>
+                <option value="step">Step (two-switch)</option>
+              </select>
+            }
+          />
+          {/* --- end access-inclusion --- */}
           <Row
             label={`Scan dwell: ${(s.switchScanIntervalMs / 1000).toFixed(1)}s per item`}
             help="How long each choice stays highlighted before the scan advances."
@@ -351,6 +465,24 @@ export function Settings({ onBack, onLogout }: Props) {
               />
             }
           />
+          {/* --- access-inclusion: student-facing language --- */}
+          <Row
+            label="Student-facing language"
+            help="Session narration, break/done screens, scanning buttons, and the AAC board display and speak in this language. Authored trial content (sight words, prompts) stays in English — see src/i18n/README.md."
+            control={
+              <select
+                value={s.language}
+                onChange={(e) =>
+                  update({ language: e.target.value as AppSettings["language"] })
+                }
+                className="rounded-xl border border-line bg-white px-3 py-2 text-sm"
+              >
+                <option value="en">English</option>
+                <option value="es">Español (Spanish)</option>
+              </select>
+            }
+          />
+          {/* --- end access-inclusion --- */}
         </Card>
 
         <Card className="p-6">
@@ -367,7 +499,13 @@ export function Settings({ onBack, onLogout }: Props) {
 
       {showCal && (
         <CalibrationOverlay
-          onClose={() => setShowCal(false)}
+          onClose={() => {
+            setShowCal(false);
+            // --- access-inclusion: re-read settings so the freshness line
+            // reflects the lastCalibrationAt just stamped by the overlay. ---
+            settingsRepo.get().then(setS);
+            // --- end access-inclusion ---
+          }}
           cameraTracking={s.cameraTracking}
         />
       )}
@@ -461,18 +599,28 @@ function Row({
 function Toggle({
   checked,
   onChange,
+  // --- access-inclusion: optional disabled state (camera-preview toggle) ---
+  disabled = false,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
+  disabled?: boolean;
+  // --- end access-inclusion ---
 }) {
   return (
     <button
       role="switch"
       aria-checked={checked}
+      // --- access-inclusion ---
+      disabled={disabled}
+      // --- end access-inclusion ---
       onClick={() => onChange(!checked)}
       className={
         "w-11 h-6 rounded-full transition-colors relative " +
-        (checked ? "bg-sage" : "bg-line")
+        (checked ? "bg-sage" : "bg-line") +
+        // --- access-inclusion ---
+        (disabled ? " opacity-40 cursor-not-allowed" : "")
+        // --- end access-inclusion ---
       }
     >
       <span

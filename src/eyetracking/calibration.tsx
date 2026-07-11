@@ -6,11 +6,18 @@
 // (a few samples per point — the minimum that meaningfully improves the
 // ridge regression). Under the simulated source the same UI runs without
 // a camera so the flow can be demoed anywhere.
+//
+// Student-facing narration is localized (src/i18n): the language is read
+// from settings at mount. Completion stamps AppSettings.lastCalibrationAt
+// so Settings can surface calibration freshness next to the Calibrate
+// button.
 
 import { useEffect, useState } from "react";
 import { useSpeak } from "@/hooks/useSpeak";
 import { Button } from "@/components/Button";
 import { useGazeStore } from "./gazeStore";
+import { settingsRepo } from "@/db/settingsRepo";
+import { setLanguage, t, ttsLang } from "@/i18n/strings";
 
 const POINTS: Array<{ x: string; y: string }> = [
   { x: "50%", y: "50%" },
@@ -43,8 +50,18 @@ export function CalibrationOverlay({ onClose, cameraTracking = false }: Props) {
     if (useGazeStore.getState().mode === "off") {
       void enable(cameraTracking);
     }
-    speak("Look at the dot, then tap it. We will do this five times.");
-    return () => cancel();
+    // Narrate in the student-facing language: initialise it from settings
+    // before the first spoken line.
+    let cancelled = false;
+    void settingsRepo.get().then((s) => {
+      if (cancelled) return;
+      setLanguage(s.language);
+      speak(t("calibrationIntro"), { lang: ttsLang() });
+    });
+    return () => {
+      cancelled = true;
+      cancel();
+    };
   }, [speak, cancel, startCalibration, enable, cameraTracking]);
 
   const recordReal = (el: HTMLElement) => {
@@ -65,12 +82,14 @@ export function CalibrationOverlay({ onClose, cameraTracking = false }: Props) {
     advanceCalibration(next, POINTS.length);
     if (next >= POINTS.length) {
       finishCalibration();
-      speak("All set. Calibration complete.");
+      // Stamp calibration freshness (surfaced in Settings).
+      void settingsRepo.patch({ lastCalibrationAt: Date.now() });
+      speak(t("calibrationDone"), { lang: ttsLang() });
       setTimeout(onClose, 700);
       return;
     }
     setStep(next);
-    speak("Now look at the next dot.");
+    speak(t("calibrationNext"), { lang: ttsLang() });
   };
 
   const point = POINTS[step] ?? POINTS[0];
@@ -87,7 +106,7 @@ export function CalibrationOverlay({ onClose, cameraTracking = false }: Props) {
       </div>
       <button
         onClick={handleTap}
-        aria-label={`Calibration point ${step + 1}`}
+        aria-label={t("calibrationPointAria", { n: step + 1 })}
         className="absolute -translate-x-1/2 -translate-y-1/2 w-16 h-16 rounded-full bg-sage shadow-card animate-breathe focus:outline-none focus-visible:ring-4 focus-visible:ring-sage-200"
         style={{ left: point.x, top: point.y }}
       />

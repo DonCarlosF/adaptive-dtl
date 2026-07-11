@@ -4,6 +4,14 @@ interface SpeakOptions {
   rate?: number;
   pitch?: number;
   volume?: number;
+  // --- access-inclusion ---
+  /**
+   * BCP-47 language for this utterance (e.g. "es-ES", "en-US"). When set,
+   * a voice matching the language is preferred; if none exists the platform
+   * resolves one from `utterance.lang`. Omitted = default English voice.
+   */
+  lang?: string;
+  // --- end access-inclusion ---
   /** Called when speech ends (or fails to start). */
   onEnd?: () => void;
 }
@@ -49,7 +57,22 @@ export function useSpeak() {
     utter.rate = opts.rate ?? 0.95;
     utter.pitch = opts.pitch ?? 1;
     utter.volume = opts.volume ?? 1;
-    if (voiceRef.current) utter.voice = voiceRef.current;
+    // --- access-inclusion: per-utterance language (student-facing i18n) ---
+    if (opts.lang) {
+      utter.lang = opts.lang;
+      const wanted = opts.lang.toLowerCase();
+      const base = wanted.split("-")[0];
+      const voices = synth.getVoices() ?? [];
+      const norm = (l: string) => l.toLowerCase().replace("_", "-");
+      const voice =
+        voices.find((v) => norm(v.lang) === wanted) ??
+        voices.find((v) => norm(v.lang).startsWith(base));
+      // No match: leave utter.voice unset so the platform picks by lang.
+      if (voice) utter.voice = voice;
+    } else if (voiceRef.current) {
+      utter.voice = voiceRef.current;
+    }
+    // --- end access-inclusion ---
     utter.onend = () => opts.onEnd?.();
     utter.onerror = () => opts.onEnd?.();
     synth.speak(utter);

@@ -65,6 +65,9 @@ import { Sparkles } from "lucide-react";
 import { useSessionBroadcast } from "@/realtime/useSessionBroadcast";
 import type { Snapshot } from "@/realtime/protocol";
 // --- end realtime co-presence ---
+// --- access-inclusion: scanning modes + student-facing i18n ---
+import { Language, setLanguage, t, ttsLang } from "@/i18n/strings";
+// --- end access-inclusion ---
 
 interface Props {
   student: StudentProfile;
@@ -95,6 +98,13 @@ export function StudentSession({ student, domain, onExit }: Props) {
   const [showGazeIndicator, setShowGazeIndicator] = useState(false);
   const [switchScanning, setSwitchScanning] = useState(false);
   const [switchScanIntervalMs, setSwitchScanIntervalMs] = useState(1500);
+  // --- access-inclusion: scan mode + student-facing language ---
+  const [switchScanMode, setSwitchScanMode] = useState<"auto" | "step">("auto");
+  // Mirrored in state (not just the module-level i18n setter) so a non-"en"
+  // language forces a re-render of every t()-rendered label after settings
+  // load, and so speak() callsites carry it in their dependency lists.
+  const [sessionLang, setSessionLang] = useState<Language>("en");
+  // --- end access-inclusion ---
   // --- PWA/Voice/AAC branch additions ---
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [aacEnabled, setAacEnabled] = useState(false);
@@ -142,6 +152,11 @@ export function StudentSession({ student, domain, onExit }: Props) {
         settings.switchScanning || student.responseMethod === "eye gaze",
       );
       setSwitchScanIntervalMs(settings.switchScanIntervalMs);
+      // --- access-inclusion: scan mode + student-facing language ---
+      setSwitchScanMode(settings.switchScanMode);
+      setLanguage(settings.language);
+      setSessionLang(settings.language);
+      // --- end access-inclusion ---
       // --- PWA/Voice/AAC branch additions ---
       setVoiceEnabled(settings.voiceInput);
       setAacEnabled(settings.aacBoard);
@@ -226,12 +241,15 @@ export function StudentSession({ student, domain, onExit }: Props) {
       }));
       cancelSpeech();
       setPhase({ kind: "break" });
-      speak("Take a moment. We can keep going when you're ready.", {
+      // --- access-inclusion: localized narration ---
+      speak(t("takeAMoment"), {
         volume: audioVolume,
+        lang: ttsLang(sessionLang),
       });
+      // --- end access-inclusion ---
     }, 500);
     return () => window.clearInterval(id);
-  }, [eyeTrackingOn, phase.kind, state.trials.length, audioVolume, speak, cancelSpeech]);
+  }, [eyeTrackingOn, phase.kind, state.trials.length, audioVolume, speak, cancelSpeech, sessionLang]);
 
   // Kick off the first trial once templates load.
   useEffect(() => {
@@ -438,9 +456,12 @@ export function StudentSession({ student, domain, onExit }: Props) {
         if (mergedDecision.suggestBreak) {
           lastBreakAtRef.current = Date.now();
           setPhase({ kind: "break" });
-          speak("Take a moment. We can keep going when you're ready.", {
+          // --- access-inclusion: localized narration ---
+          speak(t("takeAMoment"), {
             volume: audioVolume,
+            lang: ttsLang(sessionLang),
           });
+          // --- end access-inclusion ---
           return;
         }
         presentTrial(mergedNext, templates);
@@ -457,25 +478,34 @@ export function StudentSession({ student, domain, onExit }: Props) {
       presentTrial,
       eyeTrackingOn,
       buildGazeWindow,
+      // --- access-inclusion ---
+      sessionLang,
+      // --- end access-inclusion ---
     ],
   );
 
-  // Single-switch scanning input. Active only during an unlocked trial;
-  // a switch activation (Space/Enter or the on-screen Select button)
-  // chooses whichever tile is currently highlighted.
+  // Switch scanning input. Active only during an unlocked trial; a switch
+  // activation (Space/Enter or the on-screen buttons) chooses whichever
+  // tile is currently highlighted.
+  // --- access-inclusion: mode-aware scanning. "auto" keeps the original
+  // dwell behavior; "step" is manual two-switch (Space/Next advances,
+  // Enter/Select chooses; no timer). ---
   const scanActive = phase.kind === "trial" && phase.startedAt !== 0;
   const scanCount = phase.kind === "trial" ? phase.trial.choiceIds.length : 0;
-  const { index: scanIndex, select: scanSelect } = useSwitchScanning({
-    enabled: switchScanning,
-    count: scanCount,
-    intervalMs: switchScanIntervalMs,
-    active: scanActive,
-    onSelect: (i) => {
-      if (phase.kind !== "trial") return;
-      const id = phase.trial.choiceIds[i];
-      if (id) handleChoose(id);
-    },
-  });
+  const { index: scanIndex, select: scanSelect, next: scanNext } =
+    useSwitchScanning({
+      enabled: switchScanning,
+      count: scanCount,
+      intervalMs: switchScanIntervalMs,
+      active: scanActive,
+      mode: switchScanMode,
+      onSelect: (i) => {
+        if (phase.kind !== "trial") return;
+        const id = phase.trial.choiceIds[i];
+        if (id) handleChoose(id);
+      },
+    });
+  // --- end access-inclusion ---
 
   // --- realtime co-presence: broadcast + remote control (additive) ---
   // The teacher's live monitor mirrors this session and can steer it. All of
@@ -520,9 +550,12 @@ export function StudentSession({ student, domain, onExit }: Props) {
         lastBreakAtRef.current = Date.now();
         cancelSpeech();
         setPhase({ kind: "break" });
-        speak("Take a moment. We can keep going when you're ready.", {
+        // --- access-inclusion: localized narration ---
+        speak(t("takeAMoment"), {
           volume: audioVolume,
+          lang: ttsLang(sessionLang),
         });
+        // --- end access-inclusion ---
       } else if (
         control.control === "set-num-choices" &&
         control.numChoices != null
@@ -533,7 +566,9 @@ export function StudentSession({ student, domain, onExit }: Props) {
         setPhase({ kind: "done", endedEarly: true });
       }
     },
-    [phase.kind, audioVolume, speak, cancelSpeech],
+    // --- access-inclusion: + sessionLang ---
+    [phase.kind, audioVolume, speak, cancelSpeech, sessionLang],
+    // --- end access-inclusion ---
   );
 
   const { joinCode, teacherWatching } = useSessionBroadcast(
@@ -600,10 +635,13 @@ export function StudentSession({ student, domain, onExit }: Props) {
     cancelSpeech();
     lastBreakAtRef.current = Date.now();
     setPhase({ kind: "break" });
-    speak("Take a moment. We can keep going when you're ready.", {
+    // --- access-inclusion: localized narration ---
+    speak(t("takeAMoment"), {
       volume: audioVolume,
+      lang: ttsLang(sessionLang),
     });
-  }, [phase.kind, cancelSpeech, speak, audioVolume]);
+    // --- end access-inclusion ---
+  }, [phase.kind, cancelSpeech, speak, audioVolume, sessionLang]);
 
   // AAC "again" → re-read the current prompt.
   const rereadPrompt = useCallback(() => {
@@ -622,7 +660,8 @@ export function StudentSession({ student, domain, onExit }: Props) {
 
       <div className="absolute inset-0 flex items-center justify-center px-6">
         {phase.kind === "loading" && (
-          <div className="text-muted">Getting things ready…</div>
+          // --- access-inclusion: localized ---
+          <div className="text-muted">{t("gettingReady")}</div>
         )}
 
         {phase.kind === "trial" && (
@@ -657,15 +696,31 @@ export function StudentSession({ student, domain, onExit }: Props) {
 
       {eyeTrackingOn && <GazeIndicator enabled={showGazeIndicator} />}
 
+      {/* --- access-inclusion: on-screen switch controls adapt to the scan
+          mode. auto = single Select switch (original behavior); step adds a
+          Next switch that advances the highlight manually. Labels/aria are
+          localized (student-facing). --- */}
       {switchScanning && scanActive && (
-        <button
-          onClick={scanSelect}
-          aria-label="Select the highlighted choice"
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 h-20 px-12 rounded-tile bg-sky-500 text-white text-xl font-semibold shadow-card hover:bg-sky-600 active:bg-sky-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-sky-200 select-none"
-        >
-          Select
-        </button>
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-4">
+          {switchScanMode === "step" && (
+            <button
+              onClick={scanNext}
+              aria-label={t("nextAria")}
+              className="h-20 px-10 rounded-tile bg-white text-sky-600 border-2 border-sky-500 text-xl font-semibold shadow-card hover:bg-sky-50 active:bg-sky-100 focus:outline-none focus-visible:ring-4 focus-visible:ring-sky-200 select-none"
+            >
+              {t("nextButton")}
+            </button>
+          )}
+          <button
+            onClick={scanSelect}
+            aria-label={t("selectAria")}
+            className="h-20 px-12 rounded-tile bg-sky-500 text-white text-xl font-semibold shadow-card hover:bg-sky-600 active:bg-sky-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-sky-200 select-none"
+          >
+            {t("selectButton")}
+          </button>
+        </div>
       )}
+      {/* --- end access-inclusion --- */}
 
       {/* realtime co-presence: small join-code chip for the teacher's monitor. */}
       {joinCode && <JoinCodeChip code={joinCode} watching={teacherWatching} />}
@@ -678,7 +733,8 @@ export function StudentSession({ student, domain, onExit }: Props) {
           role="status"
         >
           <Mic size={14} className={reduceMotion ? undefined : "animate-pulse"} />
-          <span>Listening{speech.transcript ? `: "${speech.transcript}"` : "…"}</span>
+          {/* --- access-inclusion: localized --- */}
+          <span>{t("listening")}{speech.transcript ? `: "${speech.transcript}"` : "…"}</span>
         </div>
       )}
 
@@ -686,11 +742,13 @@ export function StudentSession({ student, domain, onExit }: Props) {
       {aacEnabled && (phase.kind === "trial" || phase.kind === "break") && (
         <button
           onClick={() => setAacOpen(true)}
-          aria-label="Open communication board"
+          // --- access-inclusion: localized label + aria ---
+          aria-label={t("aacOpenAria")}
           className="absolute bottom-4 right-4 inline-flex items-center gap-2 rounded-full bg-white border border-line shadow-tile px-4 py-2 text-sm text-ink hover:bg-sage-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-sage-500"
         >
           <MessageSquare size={16} className="text-sage-600" />
-          Talk
+          {t("aacOpenButton")}
+          {/* --- end access-inclusion --- */}
         </button>
       )}
 
@@ -702,6 +760,9 @@ export function StudentSession({ student, domain, onExit }: Props) {
           onAgain={rereadPrompt}
           onDone={() => setAacOpen(false)}
           volume={audioVolume}
+          // --- access-inclusion: per-student fringe vocabulary ---
+          extraWords={student.aacWords}
+          // --- end access-inclusion ---
         />
       )}
       {/* --- end additions --- */}
@@ -796,20 +857,20 @@ function TrialView({
 }
 
 function BreakView({ onResume }: { onResume: () => void }) {
+  // --- access-inclusion: break screen is student-facing → localized. ---
   return (
     <div className="text-center max-w-md">
       <div className="flex justify-center mb-6">
         <BreathingDot size={120} />
       </div>
-      <h2 className="text-2xl font-semibold text-ink mb-2">Take a moment.</h2>
-      <p className="text-muted mb-6">
-        Watch the dot. Breathe in as it grows, breathe out as it shrinks.
-      </p>
+      <h2 className="text-2xl font-semibold text-ink mb-2">{t("breakTitle")}</h2>
+      <p className="text-muted mb-6">{t("breakBody")}</p>
       <Button size="lg" onClick={onResume}>
-        I'm ready
+        {t("imReady")}
       </Button>
     </div>
   );
+  // --- end access-inclusion ---
 }
 
 function DoneView({
@@ -825,22 +886,26 @@ function DoneView({
   onExit: () => void;
   domain: DomainId;
 }) {
-  const correct = state.trials.filter((t) => t.correct).length;
+  const correct = state.trials.filter((r) => r.correct).length;
+  // --- access-inclusion: done screen is student-facing → localized.
+  // DOMAIN_LABELS stay English (authored content boundary, src/i18n/README.md). ---
   return (
     <div className="text-center max-w-lg">
       <h2 className="text-3xl font-semibold text-ink mb-2">
-        Nice work, {student.name}.
+        {t("doneTitle", { name: student.name })}
       </h2>
-      <p className="text-muted mb-2">Ready when you are.</p>
+      <p className="text-muted mb-2">{t("doneReady")}</p>
       <div className="text-sm text-muted mb-6">
-        {DOMAIN_LABELS[domain]} · {correct} of {state.trials.length} correct
-        {endedEarly && " · session ended early"}
+        {DOMAIN_LABELS[domain]} ·{" "}
+        {t("correctOf", { correct, total: state.trials.length })}
+        {endedEarly && ` · ${t("endedEarly")}`}
       </div>
       <Button size="lg" onClick={onExit}>
-        Back to dashboard
+        {t("backToDashboard")}
       </Button>
     </div>
   );
+  // --- end access-inclusion ---
 }
 
 function SessionHud({

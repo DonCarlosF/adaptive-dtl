@@ -25,6 +25,22 @@ export interface AppSettings {
   voiceInput: boolean;
   /** Show the AAC core-vocabulary board during sessions. */
   aacBoard: boolean;
+  // --- access-inclusion ---
+  /**
+   * Switch-scanning mode. "auto" (default): the highlight advances on the
+   * dwell timer and one switch selects. "step": manual two-switch — switch 1
+   * (Space / on-screen Next) advances, switch 2 (Enter / Select) chooses.
+   */
+  switchScanMode: "auto" | "step";
+  /** Epoch ms of the last completed eye-tracking calibration; null = never. */
+  lastCalibrationAt: number | null;
+  /**
+   * Student-facing language (session narration, break/done screens, AAC
+   * board, scanning controls). Teacher UI and authored trial content stay
+   * English — see src/i18n/README.md.
+   */
+  language: "en" | "es";
+  // --- end access-inclusion ---
 }
 
 class AdaptiveDB extends Dexie {
@@ -77,4 +93,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   switchScanIntervalMs: 1500,
   voiceInput: false,
   aacBoard: false,
+  // --- access-inclusion (settingsRepo.get merges defaults, so no migration) ---
+  switchScanMode: "auto",
+  lastCalibrationAt: null,
+  language: "en",
+  // --- end access-inclusion ---
 };
