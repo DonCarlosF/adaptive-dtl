@@ -1,13 +1,15 @@
 import express, { Response } from "express";
 import cors from "cors";
 import { z } from "zod";
-import { Store } from "./store.js";
+import { DataStore } from "./store.js";
 import {
   AuthedRequest,
   credentialsSchema,
   login,
   register,
+  requestPasswordReset,
   requireAuth,
+  resetPassword,
 } from "./auth.js";
 import {
   ProxyParams,
@@ -16,18 +18,56 @@ import {
   StreamResult,
   streamAnthropic,
 } from "./anthropic.js";
+import { rateLimit } from "./rateLimit.js";
+import { securityHeaders } from "./securityHeaders.js";
+
+export interface RateLimitSettings {
+  /** Master switch. Default true — tests that hammer routes can disable. */
+  enabled?: boolean;
+  /** Accepted requests per IP per window on /api/auth/* (default 10). */
+  authLimit?: number;
+  /** Accepted requests per IP per window on all of /api/* (default 120). */
+  apiLimit?: number;
+  /** Window length in ms for both tiers (default 60_000). */
+  windowMs?: number;
+}
 
 export interface AppOptions {
-  store: Store;
+  store: DataStore;
   jwtSecret: string;
   anthropicApiKey: string;
   /** Injectable for tests so the AI route never hits the network. */
   proxy?: (apiKey: string, params: ProxyParams) => Promise<ProxyResult>;
   /** Injectable streaming proxy for tests. */
   streamer?: (apiKey: string, params: ProxyParams) => Promise<StreamResult>;
+  /** Per-IP rate limiting. Enabled by default; see RateLimitSettings. */
+  rateLimit?: RateLimitSettings;
+  /**
+   * DEV/TEST ONLY: echo password-reset tokens in the request-reset response
+   * body. In production tokens are only logged server-side (stand-in for
+   * email delivery) — never ship with this on.
+   */
+  exposeResetTokens?: boolean;
+  /**
+   * Express `trust proxy` setting. Set (e.g. `true` or a hop count) when
+   * running behind a TLS-terminating proxy/load balancer so `req.ip` (rate
+   * limiting) and `req.secure` (HSTS) reflect the real client. Leave unset
+   * when clients connect directly — trusting X-Forwarded-For from them
+   * would let callers spoof their rate-limit identity.
+   */
+  trustProxy?: boolean | number | string;
+  /** Injectable clock (rate limiting + reset-token expiry) for tests. */
+  now?: () => number;
 }
 
 const recordSchema = z.object({ id: z.string().min(1).max(200) }).passthrough();
+
+const resetRequestSchema = z.object({ email: z.string().email().max(200) });
+
+const resetSchema = z.object({
+  token: z.string().min(1).max(200),
+  newPassword: z.string().min(8).max(200),
+});
 
 const aiMessageSchema = z.object({
   systemPrompt: z.string().min(1).max(20_000),
@@ -41,9 +81,26 @@ export function createApp(opts: AppOptions) {
   const proxy = opts.proxy ?? proxyAnthropic;
   const streamer = opts.streamer ?? streamAnthropic;
   const auth = requireAuth(jwtSecret);
+  const now = opts.now ?? Date.now;
 
   const app = express();
+  if (opts.trustProxy !== undefined) app.set("trust proxy", opts.trustProxy);
+  app.use(securityHeaders());
   app.use(cors());
+
+  // Rate limiting sits before the body parser so over-limit requests are
+  // rejected cheaply. Auth endpoints get a strict tier (they're the
+  // credential-stuffing target) layered inside the general /api tier.
+  const rl = opts.rateLimit ?? {};
+  if (rl.enabled ?? true) {
+    const windowMs = rl.windowMs ?? 60_000;
+    app.use(
+      "/api/auth",
+      rateLimit({ limit: rl.authLimit ?? 10, windowMs, now }),
+    );
+    app.use("/api", rateLimit({ limit: rl.apiLimit ?? 120, windowMs, now }));
+  }
+
   app.use(express.json({ limit: "2mb" }));
 
   app.get("/api/health", (_req, res) => res.json({ ok: true }));
@@ -68,6 +125,39 @@ export function createApp(opts: AppOptions) {
     const out = await login(store, jwtSecret, parsed.data.email, parsed.data.password);
     if (!out.ok) return res.status(401).json({ error: out.error });
     res.json({ token: out.token, user: out.user });
+  });
+
+  // Password reset, step 1. Responds 200 with the same shape whether or not
+  // the account exists — this endpoint must not enumerate users. Delivery is
+  // a server-side console log (stand-in for email); `exposeResetTokens`
+  // additionally echoes the token in the body for tests/dev only.
+  app.post("/api/auth/request-reset", (req, res) => {
+    const parsed = resetRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "A valid email is required." });
+    }
+    const token = requestPasswordReset(store, parsed.data.email, now);
+    if (token) {
+      console.log(
+        `[password-reset] token for ${parsed.data.email.toLowerCase()}: ${token} (single-use, expires in 30 min)`,
+      );
+    }
+    const body: Record<string, unknown> = { ok: true };
+    if (token && opts.exposeResetTokens) body.resetToken = token;
+    res.json(body);
+  });
+
+  // Password reset, step 2: consume the single-use token, rehash.
+  app.post("/api/auth/reset", async (req, res) => {
+    const parsed = resetSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .json({ error: "A token and an 8+ character newPassword are required." });
+    }
+    const out = await resetPassword(store, parsed.data.token, parsed.data.newPassword, now);
+    if (!out.ok) return res.status(400).json({ error: out.error });
+    res.json({ ok: true });
   });
 
   app.get("/api/auth/me", auth, (req: AuthedRequest, res) => {

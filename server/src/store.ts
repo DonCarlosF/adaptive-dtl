@@ -26,18 +26,63 @@ export interface Record_ {
   updatedAt: number;
 }
 
+/** A single-use password-reset token. Only the SHA-256 hash is stored. */
+export interface ResetToken {
+  tokenHash: string;
+  userId: string;
+  expiresAt: number;
+}
+
+/**
+ * The persistence contract the HTTP layer depends on. Implemented by the
+ * JSON-file `Store` (default) and by `SqliteStore` (`DATA_BACKEND=sqlite`).
+ * Keep the two in lockstep — the shared behavioral suite in
+ * `test/stores.test.ts` runs against both.
+ */
+export interface DataStore {
+  // Users
+  findUserByEmail(email: string): User | undefined;
+  findUserById(id: string): User | undefined;
+  createUser(email: string, passwordHash: string): User;
+  updateUserPassword(userId: string, passwordHash: string): void;
+  // Students
+  listStudents(userId: string): Record<string, unknown>[];
+  upsertStudent(userId: string, id: string, data: Record<string, unknown>): void;
+  removeStudent(userId: string, id: string): void;
+  // Sessions
+  listSessions(userId: string, studentId: string): Record<string, unknown>[];
+  saveSession(userId: string, id: string, data: Record<string, unknown>): void;
+  // AI generated sets
+  saveAiSet(userId: string, id: string, data: Record<string, unknown>): void;
+  getAiSet(userId: string, id: string): Record<string, unknown> | undefined;
+  latestAiSet(
+    userId: string,
+    studentId: string,
+    domain: string,
+  ): Record<string, unknown> | undefined;
+  // Password-reset tokens
+  createResetToken(userId: string, tokenHash: string, expiresAt: number): void;
+  /**
+   * Atomically consume a token: if it exists and has not expired at `now`,
+   * delete it and return the owning userId; otherwise return undefined.
+   * A token can therefore be redeemed at most once.
+   */
+  consumeResetToken(tokenHash: string, now: number): string | undefined;
+}
+
 interface DBShape {
   users: User[];
   students: Record_[];
   sessions: Record_[];
   aiSets: Record_[];
+  resetTokens: ResetToken[];
 }
 
 function emptyDb(): DBShape {
-  return { users: [], students: [], sessions: [], aiSets: [] };
+  return { users: [], students: [], sessions: [], aiSets: [], resetTokens: [] };
 }
 
-export class Store {
+export class Store implements DataStore {
   private db: DBShape = emptyDb();
 
   constructor(private readonly file?: string) {
@@ -81,6 +126,13 @@ export class Store {
     this.db.users.push(user);
     this.persist();
     return user;
+  }
+
+  updateUserPassword(userId: string, passwordHash: string): void {
+    const user = this.db.users.find((u) => u.id === userId);
+    if (!user) return;
+    user.passwordHash = passwordHash;
+    this.persist();
   }
 
   // --- Students ----------------------------------------------------------
@@ -152,6 +204,24 @@ export class Store {
       );
     return matches[0];
   }
+
+  // --- Password-reset tokens ----------------------------------------------
+
+  createResetToken(userId: string, tokenHash: string, expiresAt: number): void {
+    this.db.resetTokens.push({ tokenHash, userId, expiresAt });
+    this.persist();
+  }
+
+  consumeResetToken(tokenHash: string, now: number): string | undefined {
+    // Lazily drop everything that has expired, then redeem-and-delete.
+    this.db.resetTokens = this.db.resetTokens.filter((t) => t.expiresAt > now);
+    const match = this.db.resetTokens.find((t) => t.tokenHash === tokenHash);
+    if (match) {
+      this.db.resetTokens = this.db.resetTokens.filter((t) => t !== match);
+    }
+    this.persist();
+    return match?.userId;
+  }
 }
 
 function upsert(
@@ -169,7 +239,7 @@ function upsert(
   }
 }
 
-function cryptoRandomId(): string {
+export function cryptoRandomId(): string {
   return (
     Date.now().toString(36) + Math.random().toString(36).slice(2, 10)
   );
