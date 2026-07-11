@@ -10,7 +10,11 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "coverage": "vitest run --coverage"
+    "coverage": "vitest run --coverage",
+    "e2e": "npm run e2e:build && playwright test",
+    "e2e:build": "npm run build && npm run e2e:build:cloud",
+    "e2e:build:cloud": "VITE_API_URL=http://localhost:8787 vite build --outDir dist-cloud",
+    "e2e:ui": "npm run e2e:build && playwright test --ui"
   },
   "dependencies": {
     "dexie": "^4.0.8",
@@ -22,6 +26,7 @@
     "zustand": "^5.0.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.56.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
