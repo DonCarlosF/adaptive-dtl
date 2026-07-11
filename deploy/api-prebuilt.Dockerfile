@@ -2,17 +2,20 @@
 #
 # CI/air-gap-friendly variant of api.Dockerfile: install deps once
 # outside Docker (cd server && npm ci) on a linux-x64 builder, then
-# package the whole tree — no npm/network inside the build. Native
-# modules ride along (N-API keeps them ABI-stable across Node 20/22
-# on the same platform/libc).
+# package the whole tree — no npm/network inside the build.
 #
-#   (cd server && npm ci)
+# IMPORTANT: the builder must match this base image: same Node MAJOR and
+# a glibc no newer than the image (trixie = glibc 2.41).
+# better-sqlite3 ships ABI-pinned binaries (not N-API), so a tree
+# installed under Node 22 only loads on Node 22.
+#
+#   (cd server && npm ci)          # on Node 22.x, linux-x64/glibc
 #   docker build -f deploy/api-prebuilt.Dockerfile -t adaptive-dtl-api .
 #
 # The sibling api-prebuilt.Dockerfile.dockerignore re-allows
 # server/node_modules (excluded by the root .dockerignore).
 
-FROM node:20-slim
+FROM node:22-trixie-slim
 WORKDIR /app/server
 ENV NODE_ENV=production
 COPY server/ .

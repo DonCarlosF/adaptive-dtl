@@ -8,7 +8,7 @@
 # by leaving it set to the site origin via the nginx proxy, so the
 # default below points at the same host.
 
-FROM node:20-slim AS build
+FROM node:22-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 # npm can crash mid-install yet exit 0 ("Exit handler never called"),

@@ -1,11 +1,11 @@
 # Adaptive DTL — backend image (Express + JWT + Anthropic proxy + WS relay).
 #
-# node:20-slim (glibc) rather than alpine so native modules (e.g. the
+# node:22-slim (glibc) rather than alpine so native modules (e.g. the
 # SQLite driver) use prebuilt binaries without a toolchain layer.
 # Runs via tsx to match `npm start`; the server refuses to boot without
 # JWT_SECRET, which compose supplies.
 
-FROM node:20-slim
+FROM node:22-slim
 WORKDIR /app/server
 ENV NODE_ENV=production
 COPY server/package.json server/package-lock.json ./
