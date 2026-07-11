@@ -10,6 +10,11 @@ import {
   // --- access-inclusion ---
   AlertTriangle,
   // --- end access-inclusion ---
+  // --- domains-expansion ---
+  Database,
+  Download,
+  Upload,
+  // --- end domains-expansion ---
 } from "lucide-react";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
@@ -32,13 +37,18 @@ import {
 import { isCloudEnabled } from "@/api/client";
 import { logout } from "@/api/auth";
 import { LogOut } from "lucide-react";
+// --- domains-expansion ---
+import { exportBackup, importBackup } from "@/lib/backup";
+// --- end domains-expansion ---
 
 interface Props {
   onBack: () => void;
   onLogout?: () => void;
 }
 
-const DOMAINS: DomainId[] = ["sightWords", "moneyId", "communitySigns"];
+// --- domains-expansion --- derived from DOMAIN_LABELS so new domains appear automatically.
+const DOMAINS: DomainId[] = Object.keys(DOMAIN_LABELS) as DomainId[];
+// --- end domains-expansion ---
 
 type GenStatus =
   | { kind: "idle" }
@@ -52,11 +62,19 @@ export function Settings({ onBack, onLogout }: Props) {
   const [selectedStudentId, setSelectedStudentId] = useState<string>("");
   const [showCal, setShowCal] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [genStatus, setGenStatus] = useState<Record<DomainId, GenStatus>>({
-    sightWords: { kind: "idle" },
-    moneyId: { kind: "idle" },
-    communitySigns: { kind: "idle" },
-  });
+  const [genStatus, setGenStatus] = useState<Record<DomainId, GenStatus>>(
+    // --- domains-expansion --- initial state derived from DOMAINS.
+    () =>
+      Object.fromEntries(
+        DOMAINS.map((d) => [d, { kind: "idle" }]),
+      ) as Record<DomainId, GenStatus>,
+    // --- end domains-expansion ---
+  );
+  // --- domains-expansion --- backup / restore state
+  const [pendingImport, setPendingImport] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
+  // --- end domains-expansion ---
 
   useEffect(() => {
     settingsRepo.get().then(setS);
@@ -157,6 +175,40 @@ export function Settings({ onBack, onLogout }: Props) {
         : `Generated ${out.templates.length} ${DOMAIN_LABELS[domain]} trials for ${student.name}.`,
     );
   };
+
+  // --- domains-expansion --- backup / restore handlers
+  const handleExport = async () => {
+    try {
+      const counts = await exportBackup();
+      setToast(
+        `Backup downloaded — ${counts.students} students, ${counts.sessions} sessions.`,
+      );
+    } catch (e) {
+      setToast(`Export failed: ${(e as Error).message}`);
+    }
+  };
+
+  const handleImportConfirm = async () => {
+    if (!pendingImport || importing) return;
+    setImporting(true);
+    const result = await importBackup(pendingImport);
+    setImporting(false);
+    setPendingImport(null);
+    if (!result.ok) {
+      setToast(result.error);
+      return;
+    }
+    setToast(
+      `Backup restored — ${result.counts.students} students, ${result.counts.sessions} sessions.`,
+    );
+    // Re-read everything this page renders from the DB.
+    settingsRepo.get().then(setS);
+    studentRepo.list().then((rows) => {
+      setStudents(rows);
+      setSelectedStudentId(rows[0]?.id ?? "");
+    });
+  };
+  // --- end domains-expansion ---
 
   if (!s) return null;
 
@@ -484,6 +536,89 @@ export function Settings({ onBack, onLogout }: Props) {
           />
           {/* --- end access-inclusion --- */}
         </Card>
+
+        {/* --- domains-expansion --- local backup / restore */}
+        <Card className="p-6">
+          <SectionHeader
+            icon={<Database size={18} />}
+            title="Data"
+            subtitle="Students, sessions, settings, AI trial sets, and on-device ML models all live in this browser. Export a backup before clearing the browser or moving to a new device."
+          />
+          <Row
+            label="Export backup"
+            help="Downloads everything as a single JSON file."
+            control={
+              <Button size="sm" variant="secondary" onClick={handleExport}>
+                <Download size={14} /> Export backup
+              </Button>
+            }
+          />
+          <Row
+            label="Import backup"
+            help="Restores from a backup file. This replaces ALL data currently on this device."
+            control={
+              <>
+                <input
+                  ref={importInputRef}
+                  type="file"
+                  accept=".json,application/json"
+                  className="hidden"
+                  aria-label="Choose a backup file to import"
+                  onChange={(e) => {
+                    setPendingImport(e.target.files?.[0] ?? null);
+                    // Reset so picking the same file again re-triggers change.
+                    e.target.value = "";
+                  }}
+                />
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={importing}
+                  onClick={() => importInputRef.current?.click()}
+                >
+                  <Upload size={14} /> Choose file…
+                </Button>
+              </>
+            }
+          />
+          {pendingImport && (
+            <div
+              role="alertdialog"
+              aria-label="Confirm backup import"
+              className="mt-3 rounded-xl border border-coral bg-coral-soft/30 p-4"
+            >
+              <p className="text-sm text-ink">
+                Replace all local data with{" "}
+                <span className="font-semibold">{pendingImport.name}</span>?
+                The students, sessions, and settings currently on this device
+                will be deleted first. This cannot be undone.
+              </p>
+              <div className="mt-3 flex gap-2">
+                <Button
+                  size="sm"
+                  onClick={handleImportConfirm}
+                  disabled={importing}
+                >
+                  {importing ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Upload size={14} />
+                  )}
+                  {importing ? "Restoring…" : "Replace data"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={importing}
+                  onClick={() => setPendingImport(null)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+        </Card>
+        {/* --- end domains-expansion --- */}
 
         <Card className="p-6">
           <h3 className="font-semibold text-ink mb-1">Privacy</h3>

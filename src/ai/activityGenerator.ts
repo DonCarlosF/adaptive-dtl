@@ -240,7 +240,8 @@ async function buildContext(
  * seeded fake data uses opaque IDs).
  */
 function inferItemIdFromTemplateId(tplId: string): string | null {
-  const m = tplId.match(/^(sw|mn|sg)-(.+?)(?:-\d+)?$/);
+  // --- domains-expansion --- (added tt|em; keep in sync with src/lib/mastery.ts)
+  const m = tplId.match(/^(sw|mn|sg|tt|em)-(.+?)(?:-\d+)?$/);
   if (!m) return null;
   return m[2];
 }

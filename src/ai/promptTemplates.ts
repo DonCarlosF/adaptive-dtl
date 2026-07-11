@@ -115,4 +115,18 @@ const DOMAIN_GUIDANCE: Record<DomainId, string> = {
 - Use only the allowed ids (the SVG inventory is fixed).
 - Bias targets toward safety-critical signs (stop, don't walk, danger) and high-frequency-in-Oakland signs (restroom, exit).
 - Prompts should describe the sign's MEANING, not its shape — e.g. "Touch the sign that means STOP", not "Touch the red octagon".`,
+
+  // --- domains-expansion ---
+  timeTelling: `Time Telling guidance:
+- Use only the allowed ids (the clock renderer is fixed — it can only draw o'clock and half-past times). New times cannot be rendered.
+- Prompts should name the TIME the student must find — e.g. "Touch the clock that shows 3 o'clock." or "Find the clock that shows half past 6." — never describe hand positions.
+- Favor o'clock targets unless the student is already accurate with them; introduce half-past sparingly and never as the only distractor of the same hour (3:00 vs half past 3 is a near-miss, not first-line drill).
+- Distractors should sit at clearly different hand positions (e.g. 3 o'clock vs 9 o'clock, not 3 vs 4).`,
+
+  emotions: `Emotions guidance:
+- Use only the allowed ids (the face illustrations are fixed). New emotions cannot be rendered.
+- Prompts should name the FEELING — e.g. "Touch the person who feels happy." — plain words, no scenarios, no idioms.
+- Don't pair visually similar expressions as each other's only distractor early on (scared vs surprised, tired vs calm); contrast a target with clearly different feelings first.
+- Bias targets toward the core regulation words the student uses about themselves during the school day: happy, sad, angry, calm.`,
+  // --- end domains-expansion ---
 };

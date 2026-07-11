@@ -16,7 +16,9 @@ const STUDENTS: StudentProfile[] = [
     avatar: "🦊",
     grade: "3rd",
     readingLevel: "K",
-    goals: ["sightWords", "moneyId"],
+    // --- domains-expansion --- emotions added so the new domain has demo data.
+    goals: ["sightWords", "moneyId", "emotions"],
+    // --- end domains-expansion ---
     responseMethod: "touch",
     lowStim: true,
     attentionBaselineMin: 2,
@@ -29,7 +31,9 @@ const STUDENTS: StudentProfile[] = [
     avatar: "🦋",
     grade: "4th",
     readingLevel: "1st",
-    goals: ["sightWords", "moneyId", "communitySigns"],
+    // --- domains-expansion --- timeTelling added so the new domain has demo data.
+    goals: ["sightWords", "moneyId", "communitySigns", "timeTelling"],
+    // --- end domains-expansion ---
     responseMethod: "both",
     lowStim: false,
     attentionBaselineMin: 5,
@@ -138,15 +142,23 @@ function fakeSession(
   };
 }
 
+// --- domains-expansion --- explicit per-domain starting accuracy for the
+// fake history generator (was a ternary over the original three domains).
+const BASE_ACC: Record<DomainId, number> = {
+  sightWords: 0.55,
+  moneyId: 0.5,
+  communitySigns: 0.6,
+  timeTelling: 0.45,
+  emotions: 0.65,
+};
+// --- end domains-expansion ---
+
 function generateHistoryFor(student: StudentProfile): SessionRecord[] {
   const sessions: SessionRecord[] = [];
   for (const domain of student.goals) {
     // 4–6 sessions, staggered over the past three weeks.
     const count = 4 + ((hash(student.id + domain) % 3));
-    const baseAcc =
-      domain === "sightWords" ? 0.55
-        : domain === "moneyId" ? 0.5
-        : 0.6;
+    const baseAcc = BASE_ACC[domain];
     for (let i = 0; i < count; i++) {
       const daysAgo = 21 - i * 4;
       sessions.push(fakeSession(student.id, domain, daysAgo, baseAcc, i));

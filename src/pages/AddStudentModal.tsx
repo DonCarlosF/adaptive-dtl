@@ -11,7 +11,10 @@ import {
 
 const AVATARS = ["🦊", "🦋", "🐉", "🦉", "🐢", "🦒", "🐙", "🦔", "🌻", "🌟", "🐳", "🦦"];
 const READING_LEVELS: ReadingLevel[] = ["PreK", "K", "1st", "2nd"];
-const GOALS: DomainId[] = ["sightWords", "moneyId", "communitySigns"];
+// --- domains-expansion --- goal checkboxes derive from DOMAIN_LABELS so
+// future domains show up here for free.
+const GOALS: DomainId[] = Object.keys(DOMAIN_LABELS) as DomainId[];
+// --- end domains-expansion ---
 const METHODS: ResponseMethod[] = ["touch", "eye gaze", "both"];
 
 interface Props {
