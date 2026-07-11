@@ -1,0 +1,16 @@
+# Ignore rules for the prebuilt web image ONLY (buildkit per-Dockerfile
+# ignore). Unlike the root .dockerignore, dist/ must be included here.
+node_modules
+server
+.git
+.github
+.claude
+e2e
+playwright-report
+test-results
+coverage
+src
+public
+*.log
+.env
+.env.*

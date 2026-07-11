@@ -11,7 +11,10 @@ import {
 
 const AVATARS = ["🦊", "🦋", "🐉", "🦉", "🐢", "🦒", "🐙", "🦔", "🌻", "🌟", "🐳", "🦦"];
 const READING_LEVELS: ReadingLevel[] = ["PreK", "K", "1st", "2nd"];
-const GOALS: DomainId[] = ["sightWords", "moneyId", "communitySigns"];
+// --- domains-expansion --- goal checkboxes derive from DOMAIN_LABELS so
+// future domains show up here for free.
+const GOALS: DomainId[] = Object.keys(DOMAIN_LABELS) as DomainId[];
+// --- end domains-expansion ---
 const METHODS: ResponseMethod[] = ["touch", "eye gaze", "both"];
 
 interface Props {
@@ -30,6 +33,9 @@ export function AddStudentModal({ open, onClose, onSave }: Props) {
   const [lowStim, setLowStim] = useState(false);
   const [attentionBaselineMin, setAttention] = useState(3);
   const [note, setNote] = useState("");
+  // --- access-inclusion: per-student AAC fringe vocabulary ---
+  const [aacWordsText, setAacWordsText] = useState("");
+  // --- end access-inclusion ---
 
   const canSave = name.trim().length > 0 && goals.length > 0;
 
@@ -43,10 +49,24 @@ export function AddStudentModal({ open, onClose, onSave }: Props) {
     setLowStim(false);
     setAttention(3);
     setNote("");
+    // --- access-inclusion ---
+    setAacWordsText("");
+    // --- end access-inclusion ---
   };
 
   const submit = () => {
     if (!canSave) return;
+    // --- access-inclusion: parse comma-separated AAC words (trim, drop
+    // empties, dedupe) into StudentProfile.aacWords. ---
+    const aacWords = [
+      ...new Set(
+        aacWordsText
+          .split(",")
+          .map((w) => w.trim())
+          .filter(Boolean),
+      ),
+    ];
+    // --- end access-inclusion ---
     onSave({
       id: `stu-${Date.now()}`,
       name: name.trim(),
@@ -58,6 +78,9 @@ export function AddStudentModal({ open, onClose, onSave }: Props) {
       lowStim,
       attentionBaselineMin,
       note: note.trim() || undefined,
+      // --- access-inclusion ---
+      aacWords: aacWords.length > 0 ? aacWords : undefined,
+      // --- end access-inclusion ---
       createdAt: Date.now(),
     });
     reset();
@@ -179,6 +202,21 @@ export function AddStudentModal({ open, onClose, onSave }: Props) {
             className="w-full accent-sage-500"
           />
         </Field>
+
+        {/* --- access-inclusion: per-student AAC fringe vocabulary --- */}
+        <Field label="My words — AAC board (optional)">
+          <input
+            value={aacWordsText}
+            onChange={(e) => setAacWordsText(e.target.value)}
+            placeholder="Comma-separated, e.g. pizza, Mom, dinosaur"
+            className="w-full rounded-xl border border-line bg-white px-3 py-2 focus:outline-none focus:border-sage"
+          />
+          <div className="text-xs text-muted mt-1">
+            Personal words (favorite items, people) added to this student's
+            communication board. Each speaks aloud when tapped.
+          </div>
+        </Field>
+        {/* --- end access-inclusion --- */}
 
         <Field label="Note (optional)">
           <textarea

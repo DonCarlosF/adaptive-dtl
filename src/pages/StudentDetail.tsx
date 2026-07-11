@@ -34,6 +34,9 @@ const SessionReplay = lazy(() =>
 const Copilot = lazy(() =>
   import("./Copilot").then((m) => ({ default: m.Copilot })),
 );
+// --- domains-expansion --- per-item mastery heatmap, lazy like the chart.
+const MasteryHeatmap = lazy(() => import("./MasteryHeatmap"));
+// --- end domains-expansion ---
 
 interface Props {
   student: StudentProfile;
@@ -57,11 +60,14 @@ export function StudentDetail({ student, onStartSession }: Props) {
   }, [student.id]);
 
   const byDomain = useMemo(() => {
-    const out: Record<DomainId, SessionRecord[]> = {
-      sightWords: [],
-      moneyId: [],
-      communitySigns: [],
-    };
+    // --- domains-expansion --- keys derived from DOMAIN_LABELS so new
+    // domains are covered automatically.
+    const out = Object.fromEntries(
+      (Object.keys(DOMAIN_LABELS) as DomainId[]).map(
+        (d) => [d, [] as SessionRecord[]] as const,
+      ),
+    ) as Record<DomainId, SessionRecord[]>;
+    // --- end domains-expansion ---
     for (const s of sessions) out[s.domain].push(s);
     for (const k of Object.keys(out) as DomainId[]) {
       out[k] = [...out[k]].sort((a, b) => a.startedAt - b.startedAt).slice(-10);
@@ -104,6 +110,14 @@ export function StudentDetail({ student, onStartSession }: Props) {
           />
         ))}
       </div>
+
+      {/* --- domains-expansion --- per-item mastery heatmap */}
+      {sessions.length > 0 && (
+        <Suspense fallback={<HeatmapSkeleton />}>
+          <MasteryHeatmap sessions={sessions} goals={student.goals} />
+        </Suspense>
+      )}
+      {/* --- end domains-expansion --- */}
 
       <div>
         <div className="flex items-center justify-between mb-2">
@@ -241,6 +255,21 @@ function DomainPanel({
     </div>
   );
 }
+
+// --- domains-expansion ---
+function HeatmapSkeleton() {
+  return (
+    <div className="bg-white border border-line rounded-tile p-4">
+      <div className="h-5 w-36 bg-line/60 rounded mb-3 animate-pulse" />
+      <div className="flex flex-wrap gap-1.5 opacity-40">
+        {Array.from({ length: 12 }, (_, i) => (
+          <div key={i} className="h-10 w-24 bg-line rounded-lg animate-pulse" />
+        ))}
+      </div>
+    </div>
+  );
+}
+// --- end domains-expansion ---
 
 function ChartSkeleton() {
   return (

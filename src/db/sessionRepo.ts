@@ -10,12 +10,12 @@ function useCloud(): boolean {
 export const sessionRepo = {
   async listForStudent(studentId: string): Promise<SessionRecord[]> {
     if (useCloud()) return cloudSessionRepo.listForStudent(studentId);
-    return db.sessions
-      .where("studentId")
-      .equals(studentId)
-      .reverse()
-      .sortBy("startedAt")
-      .then((rows) => rows.reverse());
+    // Most-recent-first, matching the cloud repo. (An explicit sort: the
+    // old reverse().sortBy().reverse() chain cancelled itself out and
+    // returned oldest-first, which silently truncated the newest session
+    // from capped lists once a student had 12+ sessions.)
+    const rows = await db.sessions.where("studentId").equals(studentId).toArray();
+    return rows.sort((a, b) => b.startedAt - a.startedAt);
   },
 
   async listForStudentAndDomain(

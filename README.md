@@ -73,15 +73,24 @@ for the API and security notes.
 ### Tests
 
 ```bash
-npm test            # frontend: engine rules, gaze rules, exports, hooks, components
-cd server && npm test   # backend: auth, per-user data scoping, AI proxy
+npm test                # frontend units: engine, gaze, ML, i18n, exports, hooks, components
+cd server && npm test   # backend: auth, data scoping, stores (json+sqlite), rate limit, reset, realtime
+npm run e2e             # real-browser E2E (Playwright): session loop, scanning, settings, PWA, cloud login
 ```
+
+### Deployment
+
+Two shapes — static hosting for the local-first mode, or `docker compose up`
+for the full cloud stack (nginx SPA + API + SQLite, verified end-to-end).
+See [`deploy/README.md`](./deploy/README.md).
 
 ## What the app does
 
 - **Teacher Dashboard.** Add students, set their reading level and goals and response method, see trend lines per goal area, scrub through past sessions in the replay view, and export a quarter's progress as CSV or printable PDF.
 - **Student Session.** Fullscreen, locked to a 3-second hold-to-exit. Audio prompt, 2–4 large choice tiles, soft chime + thumbs-up on correct, errorless re-prompt on wrong, breathing-dot break when the adaptive engine suggests one, calm completion screen at the end. Touch or single-switch scanning input.
-- **Three skill domains.** Sight Words (Dolch list, leveled PreK–2nd, with optional AI-introduced words rendered through the same tile component). Money ID (penny → $5 bill, labeled inline SVGs). Community Signs (stop, exit, restroom, walk / don't walk, danger).
+- **Five skill domains.** Sight Words (Dolch list, leveled PreK–2nd, with optional AI-introduced words rendered through the same tile component). Money ID (penny → $5 bill, labeled inline SVGs). Community Signs (stop, exit, restroom, walk / don't walk, danger). Time Telling (analog clock faces, o'clock and half-past). Emotions (eight hand-drawn faces where no single feature — and never color alone — carries the meaning).
+- **Mastery analytics + data safety.** A per-item mastery heatmap on the student page (mastered / developing / emerging / new buckets, fully keyboard- and screen-reader-accessible), and one-click JSON backup/restore of all local data in Settings.
+- **Deep access & inclusion.** Auto *and* manual step (two-switch) scanning modes; per-student AAC "My words" fringe vocabulary; a camera-positioning preview and calibration-freshness hints for eye tracking; Spanish student-facing mode (narration, break/done screens, AAC board — with matching TTS voice).
 - **Adaptive engine.** Four response-based rules and three gaze-based rules that compose: choice count goes up after 3-in-a-row correct, drops to 2 with errorless on after 2-in-a-row wrong, suggests a break when response time spikes, ends the session early below 50% at trial 8. Gaze rules add an off-screen-for-5-seconds break trigger, a look-before-answer score, and an attention-pacing flag.
 - **On-device ML adaptation.** A pure-TypeScript layer (no TF.js, no heavy deps) on top of the rules: an attention/engagement score derived from gaze features, and an online logistic-regression difficulty model that trains across a student's sessions and advises difficulty changes. Strictly advisory and safe-only — it can ease or hold, never override a safety drop or early-end. Persisted per `(student, domain)`.
 - **Live AI tutor.** Streaming Claude responses (SSE, client + server) power a teacher co-pilot drawer: ask natural-language questions grounded in a student's session history, and one-click draft a Zod-validated IEP progress note. Streams token-by-token; lazy-loaded so it never bloats the dashboard chunk.

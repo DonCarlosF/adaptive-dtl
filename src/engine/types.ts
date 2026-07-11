@@ -9,13 +9,22 @@ export type ReadingLevel = "PreK" | "K" | "1st" | "2nd";
 
 export type ResponseMethod = "touch" | "eye gaze" | "both";
 
-export type DomainId = "sightWords" | "moneyId" | "communitySigns";
+// --- domains-expansion ---
+export type DomainId =
+  | "sightWords"
+  | "moneyId"
+  | "communitySigns"
+  | "timeTelling"
+  | "emotions";
 
 export const DOMAIN_LABELS: Record<DomainId, string> = {
   sightWords: "Sight Words",
   moneyId: "Money ID",
   communitySigns: "Community Signs",
+  timeTelling: "Time Telling",
+  emotions: "Emotions",
 };
+// --- end domains-expansion ---
 
 export interface StudentProfile {
   id: string;
@@ -30,6 +39,13 @@ export interface StudentProfile {
   attentionBaselineMin: number;
   /** Free-text teacher note. */
   note?: string;
+  // --- access-inclusion ---
+  /**
+   * Personal AAC fringe vocabulary (favourite items/people). Rendered as
+   * extra "My words" tiles on the communication board; each speaks on tap.
+   */
+  aacWords?: string[];
+  // --- end access-inclusion ---
   createdAt: number;
 }
 

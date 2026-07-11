@@ -10,6 +10,12 @@ import { buildMoneyTrials, findMoney, MONEY_ITEMS } from "./moneyId/trials";
 import { MoneyTile } from "./moneyId/MoneyTile";
 import { buildSignTrials, findSign, SIGNS } from "./communitySigns/trials";
 import { SignTile } from "./communitySigns/SignTile";
+// --- domains-expansion ---
+import { buildTimeTrials, findTime, TIME_ITEMS } from "./timeTelling/trials";
+import { TimeTile } from "./timeTelling/TimeTile";
+import { buildEmotionTrials, findEmotion, EMOTIONS } from "./emotions/trials";
+import { EmotionTile } from "./emotions/EmotionTile";
+// --- end domains-expansion ---
 
 /** Item exposed to the AI generator's prompt: id + plain label. */
 export interface AIItem {
@@ -64,10 +70,34 @@ const communitySigns: DomainModule = {
   isValidChoiceId: (id) => !!findSign(id),
 };
 
+// --- domains-expansion ---
+const timeTelling: DomainModule = {
+  id: "timeTelling",
+  buildTrials: () => buildTimeTrials(),
+  renderChoice: (id) => <TimeTile choiceId={id} />,
+  ariaLabel: (id) => findTime(id)?.label ?? "clock",
+  availableForAI: () => TIME_ITEMS.map((t) => ({ id: t.id, label: t.label })),
+  isValidChoiceId: (id) => !!findTime(id),
+};
+
+const emotions: DomainModule = {
+  id: "emotions",
+  buildTrials: () => buildEmotionTrials(),
+  renderChoice: (id) => <EmotionTile choiceId={id} />,
+  ariaLabel: (id) => findEmotion(id)?.spoken ?? "feeling",
+  availableForAI: () => EMOTIONS.map((e) => ({ id: e.id, label: e.label })),
+  isValidChoiceId: (id) => !!findEmotion(id),
+};
+// --- end domains-expansion ---
+
 const REGISTRY: Record<DomainId, DomainModule> = {
   sightWords,
   moneyId,
   communitySigns,
+  // --- domains-expansion ---
+  timeTelling,
+  emotions,
+  // --- end domains-expansion ---
 };
 
 export function getDomain(id: DomainId): DomainModule {

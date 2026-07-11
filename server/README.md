@@ -48,6 +48,8 @@ All routes are under `/api`. Authenticated routes need
 | ------ | -------------------------------------- | -------------------------------- |
 | POST   | `/api/auth/register`                   | Create account → `{ token, user }` |
 | POST   | `/api/auth/login`                      | Sign in → `{ token, user }`      |
+| POST   | `/api/auth/request-reset`              | Start a password reset (always 200) |
+| POST   | `/api/auth/reset`                      | Finish a reset with a token      |
 | GET    | `/api/auth/me`                         | Current user                     |
 | GET    | `/api/students`                        | List the teacher's students      |
 | PUT    | `/api/students/:id`                    | Upsert a student                 |
@@ -60,17 +62,77 @@ All routes are under `/api`. Authenticated routes need
 
 ## Persistence
 
-Storage is a small JSON-file store (`Store` in `src/store.ts`) with an
-in-memory mode for tests. Its method surface is what a SQLite/Postgres
-repository would expose, so swapping in a real database for a larger
-deployment is a drop-in change behind that class — no route changes.
+Two interchangeable backends implement the same `DataStore` interface
+(`src/store.ts`); routes never know which one is underneath, and a shared
+behavioral suite (`test/stores.test.ts`) runs against both.
+
+| `DATA_BACKEND` | Backend                              | Location env (default)     |
+| -------------- | ------------------------------------ | -------------------------- |
+| `json` (default) | JSON-file `Store` (`src/store.ts`) | `DATA_FILE` (`./data/db.json`) |
+| `sqlite`       | `SqliteStore` (`src/sqliteStore.ts`), better-sqlite3, WAL mode, prepared statements | `DB_FILE` (`./data/app.db`) |
+
+The default is unchanged from earlier versions — nothing switches to SQLite
+unless you opt in with `DATA_BACKEND=sqlite`. The SQLite schema keeps the
+client payloads opaque in a JSON `data` column and extracts the columns the
+queries need (`user_id`, `student_id`, `domain`, `generated_at`) into
+indexed columns at write time. Both stores have an in-memory mode used by
+the tests (`new Store()` / `new SqliteStore()` with no path). There is no
+automatic migration between backends.
+
+## Rate limiting
+
+Per-IP, in-memory, sliding-window rate limiting (`src/rateLimit.ts`, no
+dependencies) is on by default:
+
+- **`/api/auth/*` — 10 accepted requests/min per IP** (login, register, and
+  the reset endpoints are the brute-force target).
+- **`/api/*` — 120 accepted requests/min per IP** (all API traffic,
+  including the auth routes — an auth request draws from both budgets).
+
+Over-limit requests get `429` with a `retry-after` header (seconds);
+rejected requests don't consume budget, so backing off for `retry-after`
+always works. Tune or disable via the `rateLimit` option of `createApp`
+(`{ enabled, authLimit, apiLimit, windowMs }` — tests disable it or inject
+a clock via the `now` option).
+
+Behind a reverse proxy / load balancer, set `TRUST_PROXY` (e.g. `1`) so
+`req.ip` is the real client, not the proxy — otherwise all clients share
+one bucket. Never set it when clients connect directly, or they could
+spoof `X-Forwarded-For` to dodge the limiter.
+
+## Password reset
+
+1. `POST /api/auth/request-reset { email }` — **always responds
+   `200 { ok: true }`**, whether or not the account exists (no user
+   enumeration). When it exists, a single-use token (32 random bytes,
+   30-minute expiry, only its SHA-256 hash is stored) is created and
+   logged to the server console — a stand-in for email delivery; wire up
+   a mailer before a real rollout.
+2. `POST /api/auth/reset { token, newPassword }` — validates (8+ chars),
+   consumes the token (one redemption ever, expiry enforced), and
+   bcrypt-rehashes the password. Invalid/expired/reused tokens get `400`.
+
+Dev/test only: `createApp({ exposeResetTokens: true })` echoes the token in
+the request-reset response body so the flow is testable without scraping
+logs. Never enable it in production — `src/index.ts` does not.
 
 ## Security notes
 
-- Passwords are bcrypt-hashed; only the hash is stored.
+- Passwords are bcrypt-hashed; only the hash is stored. Password reset is
+  single-use-token based (see above) and never reveals whether an account
+  exists.
 - All data routes are scoped by the token's user id — one teacher can
   never read or write another's records (covered by the test suite).
 - `JWT_SECRET` is required to boot; the server refuses to start without it.
-- This is a starting point, not a hardened production deployment: add
-  rate limiting, HTTPS termination, password-reset, and a real database
-  before a district rollout.
+- Per-IP rate limiting is enabled by default, strictest on `/api/auth/*`
+  (see above).
+- Every response carries `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, and `Referrer-Policy: no-referrer`;
+  `Strict-Transport-Security` is added once a request arrives over HTTPS
+  (`req.secure` or `X-Forwarded-Proto: https`).
+- The server itself speaks plain HTTP — terminate TLS in front of it
+  (reverse proxy / load balancer) and set `TRUST_PROXY` so rate limiting
+  and HSTS see real client info.
+- Remaining before a district rollout: real email delivery for resets,
+  token/session revocation, audit logging, and backups for whichever
+  data backend you run.

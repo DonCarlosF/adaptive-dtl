@@ -3,6 +3,7 @@ node_modules/
 
 # Build output
 dist/
+dist-cloud/
 
 # Local environment files
 .env
@@ -26,6 +27,11 @@ yarn-error.log*
 coverage/
 lighthouse.html
 lighthouse.json
+
+# Playwright E2E output / runtime state
+playwright-report/
+test-results/
+.e2e-tmp/
 
 # Vite cache
 .vite/

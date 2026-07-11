@@ -1,0 +1,55 @@
+# Adaptive DTL — one-command cloud deployment.
+#
+#   JWT_SECRET=$(openssl rand -hex 32) docker compose up --build
+#
+# Serves the app at http://localhost:8080 (nginx: SPA + /api + /ws proxy)
+# with the backend on an internal network and data on a named volume.
+# For a real domain, change PUBLIC_ORIGIN and terminate TLS in front
+# (Caddy/Traefik/ALB) — see deploy/README.md.
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: deploy/web.Dockerfile
+      args:
+        # Baked into the SPA at build time. Must be the origin browsers
+        # use to reach this stack (nginx proxies /api and /ws onward).
+        VITE_API_URL: ${PUBLIC_ORIGIN:-http://localhost:8080}
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: deploy/api.Dockerfile
+    environment:
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (e.g. openssl rand -hex 32)}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      PORT: "8787"
+      # SQLite backend (falls back to the JSON store if unset).
+      DATA_BACKEND: ${DATA_BACKEND:-sqlite}
+      DB_FILE: /app/server/data/app.db
+      DATA_FILE: /app/server/data/db.json
+    volumes:
+      - dtl-data:/app/server/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:8787/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  dtl-data:

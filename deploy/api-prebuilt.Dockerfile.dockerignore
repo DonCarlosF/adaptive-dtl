@@ -1,0 +1,19 @@
+# Ignore rules for the prebuilt api image ONLY: server/node_modules must
+# be included (root .dockerignore excludes it for the source variant).
+node_modules
+dist
+dist-cloud
+src
+public
+.git
+.github
+.claude
+e2e
+playwright-report
+test-results
+coverage
+*.log
+.env
+.env.*
+server/data
+server/*.log

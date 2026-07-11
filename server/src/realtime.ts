@@ -32,8 +32,15 @@ export type Role = z.infer<typeof RoleSchema>;
 export const SnapshotSchema = z.object({
   /** One of the StudentSession phases. */
   phase: z.enum(["loading", "trial", "feedback", "break", "done"]),
-  /** Domain being practiced. */
-  domain: z.enum(["sightWords", "moneyId", "communitySigns"]),
+  /** Domain being practiced. Keep in sync with DomainId in the app
+   * (src/engine/types.ts) and the client mirror (src/realtime/protocol.ts). */
+  domain: z.enum([
+    "sightWords",
+    "moneyId",
+    "communitySigns",
+    "timeTelling",
+    "emotions",
+  ]),
   /** Completed trial count and the planned total (for the progress ring). */
   trialIndex: z.number().int().nonnegative(),
   plannedTrials: z.number().int().positive(),

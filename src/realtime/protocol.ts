@@ -18,7 +18,8 @@ export type Role = z.infer<typeof RoleSchema>;
 /** Compact snapshot the student broadcasts to a watching teacher. */
 export const SnapshotSchema = z.object({
   phase: z.enum(["loading", "trial", "feedback", "break", "done"]),
-  domain: z.enum(["sightWords", "moneyId", "communitySigns"]),
+  // --- domains-expansion --- (must mirror DomainId in engine/types.ts AND server/src/realtime.ts)
+  domain: z.enum(["sightWords", "moneyId", "communitySigns", "timeTelling", "emotions"]),
   trialIndex: z.number().int().nonnegative(),
   plannedTrials: z.number().int().positive(),
   correct: z.number().int().nonnegative(),

@@ -99,4 +99,124 @@ describe("useSwitchScanning", () => {
     });
     expect(onSelect).not.toHaveBeenCalled();
   });
+
+  it('explicit mode: "auto" behaves like the default (timer + Enter selects)', () => {
+    const onSelect = vi.fn();
+    const { result } = renderHook(() =>
+      useSwitchScanning({
+        enabled: true,
+        count: 3,
+        intervalMs: 1000,
+        active: true,
+        onSelect,
+        mode: "auto",
+      }),
+    );
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(result.current.index).toBe(1);
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    });
+    expect(onSelect).toHaveBeenCalledWith(1);
+  });
+});
+
+describe("useSwitchScanning — step mode (manual two-switch)", () => {
+  const opts = (onSelect: (i: number) => void = () => {}) => ({
+    enabled: true,
+    count: 3,
+    intervalMs: 1000,
+    active: true,
+    onSelect,
+    mode: "step" as const,
+  });
+
+  it("never advances on a timer", () => {
+    const { result } = renderHook(() => useSwitchScanning(opts()));
+    expect(result.current.index).toBe(0);
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(result.current.index).toBe(0);
+  });
+
+  it("Space (switch 1) advances the highlight and wraps around", () => {
+    const { result } = renderHook(() => useSwitchScanning(opts()));
+    const press = () =>
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: " " }));
+      });
+    press();
+    expect(result.current.index).toBe(1);
+    press();
+    expect(result.current.index).toBe(2);
+    press(); // wraps 2 -> 0
+    expect(result.current.index).toBe(0);
+  });
+
+  it("Space does NOT select in step mode", () => {
+    const onSelect = vi.fn();
+    renderHook(() => useSwitchScanning(opts(onSelect)));
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: " " }));
+    });
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("Enter (switch 2) selects the currently highlighted item", () => {
+    const onSelect = vi.fn();
+    const { result } = renderHook(() => useSwitchScanning(opts(onSelect)));
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: " " })); // -> 1
+    });
+    expect(result.current.index).toBe(1);
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    });
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith(1);
+  });
+
+  it("on-screen next() advances and select() chooses (button pathway)", () => {
+    const onSelect = vi.fn();
+    const { result } = renderHook(() => useSwitchScanning(opts(onSelect)));
+    act(() => {
+      result.current.next();
+    });
+    act(() => {
+      result.current.next();
+    });
+    expect(result.current.index).toBe(2);
+    act(() => {
+      result.current.select();
+    });
+    expect(onSelect).toHaveBeenCalledWith(2);
+  });
+
+  it("next()/keys are inert when not running, and index resets on restart", () => {
+    const onSelect = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ active }: { active: boolean }) =>
+        useSwitchScanning({ ...opts(onSelect), active }),
+      { initialProps: { active: true } },
+    );
+    act(() => {
+      result.current.next(); // -> 1
+    });
+    expect(result.current.index).toBe(1);
+
+    rerender({ active: false });
+    expect(result.current.index).toBe(-1);
+    act(() => {
+      result.current.next();
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    });
+    expect(onSelect).not.toHaveBeenCalled();
+
+    // Restarting scanning begins back at the first item.
+    rerender({ active: true });
+    expect(result.current.index).toBe(0);
+  });
 });

@@ -156,6 +156,23 @@ export function getCurrentGaze(): GazeSample | null {
 }
 
 /**
+ * Camera-positioning aid (teacher-only): toggle WebGazer's own video
+ * thumbnail, face overlay, and face-feedback box so a teacher can centre
+ * the student's face before calibrating. Init leaves these off for
+ * student-facing use; Settings turns them on transiently and turns them
+ * back off when the panel closes. Safe no-op when WebGazer isn't loaded.
+ */
+export function setDebugPreview(show: boolean): void {
+  const wg = window.webgazer;
+  if (!wg) return;
+  try {
+    wg.showVideoPreview(show).showFaceOverlay(show).showFaceFeedbackBox(show);
+  } catch {
+    /* WebGazer not fully initialised — ignore */
+  }
+}
+
+/**
  * Feed a calibration training sample at a screen position the student is
  * looking at (anchored to their tap on the calibration dot).
  */
