@@ -1,6 +1,6 @@
 # Agent instructions — Adaptive DTL
 
-This file is the working contract for Claude Code, Cursor, and other coding agents. [CLAUDE.md](./CLAUDE.md) is the short map. Product rationale lives in [README.md](./README.md) — do not rewrite classroom pedagogy there unless the engine actually changed.
+This file is the **canonical** project instructions for coding agents. Cursor loads it from the repo root and combines any nested `AGENTS.md` (more specific wins). [CLAUDE.md](./CLAUDE.md) is a thin Claude Code bridge (`@AGENTS.md`) — do not duplicate rules there. Do not add a legacy `.cursorrules` file. Product rationale lives in [README.md](./README.md); do not rewrite classroom pedagogy there unless the engine actually changed.
 
 **Adaptive DTL** is a local-first special-education app for discrete-trial learning. A teacher runs short sessions (prompt → 2–4 large choices → response) in three skill domains, with an adaptive engine, optional eye tracking, on-device ML, an AAC board, and an optional cloud backend for multi-teacher sync and live monitoring.
 
@@ -19,6 +19,10 @@ Special education records are among the most sensitive data this codebase can to
 - **Never commit secrets**: `.env`, Anthropic keys, `JWT_SECRET`, tokens. Templates only: `server/.env.example`. `server/data/` is gitignored; keep it that way.
 
 Local mode stores students in Dexie (IndexedDB). Cloud mode stores per-teacher records on the optional server. Both are real student data in a real deployment — treat fixtures and docs as if they will be read in public.
+
+## Cursor Project workspace
+
+This repo is suitable as a **Cursor Project** workspace: a long-running coordinator plus cloud/subagents on the same tree. Project subagents inherit **this file**, including **How to run** and **How to test** below — use those scripts instead of inventing new ones. Nested `AGENTS.md` files (for example under `server/` or `src/engine/`) are optional deltas for a subtree; keep them short so they do not drift from this root file. Glob-scoped `.cursor/rules/*.mdc` is only for Cursor-only path rules that cannot live here; none are required today. Do not add `.cursorrules`.
 
 ## Stack
 
@@ -102,6 +106,8 @@ Other views: `TeacherDashboard` / `StudentDetail` (trends, replay, export CSV/PD
 
 ## How to run
 
+Coordinator and Project subagents should use these commands (do not invent alternate scripts).
+
 ```bash
 # Frontend only (default, local-first)
 npm install
@@ -124,6 +130,8 @@ VITE_API_URL=http://localhost:8787 npm run dev
 `JWT_SECRET` is required; the server exits without it. `ANTHROPIC_API_KEY` is optional — without it `/api/ai/messages` returns 503 and the client falls back to authored trials.
 
 ## How to test
+
+Same for Project subagents: run the package you touched.
 
 ```bash
 npm test                 # frontend
